@@ -1,0 +1,439 @@
+---
+title: "APANPS5335 Midterm, Summer 2018"
+author: "Elijah Hall, EH2794"
+date: "`2018-07-06"
+output:
+  prettydoc::html_pretty:
+  theme: cayman
+highlight: github
+---
+```{r setup, include=FALSE}
+library(knitr)
+opts_chunk$set(echo = TRUE, comment="", warning = FALSE, message = FALSE, tidy.opts=list(width.cutoff=55), tidy = TRUE)
+```
+
+```{r libraries}
+library(tidyverse)
+library(zoo)
+library(PASWR)
+library(gridExtra)
+library(HSAUR)
+library(caret)
+library(ggdendro)
+library(data.table)
+library(dendextend)
+
+```
+
+```{r source_files}
+
+```
+
+```{r functions}
+
+```
+
+```{r constants}
+theme_update(plot.title = element_text(hjust = 0.5))
+
+mytheme <- theme_bw()+
+  theme(panel.border = element_blank(),
+        axis.line = element_line(color = 'black'),
+        plot.background = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        plot.title = element_text(hjust = 0.5),
+        axis.title.x = element_text(color="black", size=10),
+        axis.title.y = element_text(color="black", size=10)
+        )
+```
+
+```{r load_data}
+data(titanic3)
+data(heptathlon)
+```
+
+```{r clean_data}
+
+```
+
+
+**Directions**:  This midterm contains machine learning topics that were covered in lectures as well as related statistics and coding questions. You are free to use any functions from R package unless stated otherwise. Explain/discuss results explicitly for the full credit consideration.
+
+**Policies**:  This exam is open book and open note.  You may use any materials that you find helpful in solving the problems.  However, you must explain your answers in your own words and cite any sources.  **No collaboration with others is allowed**.
+
+## Question 1:  Coin Tosses
+
+A coin lands with heads facing up with probability $\pi$ and tails otherwise.  Subsequent tosses of the coin are independent and identically distributed.  Answer the following questions:
+
+### 1a
+
+A fair coin has $\pi = 0.5$.  If you flip a fair coin 20 times, what is the chance that you'll get at least 13 heads?
+
+```{r 1a}
+#p = pi
+#(n choose k)*p^k*(1-p)^(n-k)
+p=.5 #probability of one event
+n=20 #total number of observations
+k=13 #number of observations meeting the event chriteria
+#calculate probabilities of flipping any number of heads
+p_i<- vector("numeric",length = 20)
+for(i in 1:n){
+p_i[i]<- choose(n = n,k = i)*((p)^i)*((1-p)^(n-i))
+}
+
+#sum all probabilities of flipping 13 heads or more 
+ans<- sum(p_i[k:n])
+
+```
+
+  First the probability of flipping one heads is $X \sim {\sf Binom}(1, \pi)$. The probability of flipping any number of heads, k, in n flips, is $p_{k}=p(k \sim {\sf Binom}(n, \pi)$) = $\binom{n}{k} \times \pi^k\times(1-\pi)^{n-k}$. To calculate at least 13 heads we solve $P(X \ge 13)$ = $\sum_{k=13}^{n} p_{k}$. This is the sum of all probabilities of getting k heads greater than or equal to 13. I do this first by calculating all values of $p_{k}$ and storing them into a vetor. Then sum the index from k to n. Therfore, the probability of getting at least 13 heads is **`r round(ans,digits = 3 )`**. (PSU 2018)
+  
+
+### 1b 
+
+Now we will create a simulation.  Let's consider flipping a fair coin ($\pi = 0.5$) N times for each of the following values:
+
+* N = 50, 100, 150, 200, ..., 10000
+
+(That is, consider sample sizes in multiples of 50 all the way up to 10 thousand.)
+
+For each value of N, randomly generate this number of coin flips.  Use the sample of data to compute the maximum likelihood estimate (MLE) of $\pi$.  Create a plot of the estimates of $\pi$ as a function of the sample size.  Then comment on how the accuracy changes as N increases.
+
+```{r 1b}
+#set parameters for sampling
+N = seq(from = 50,to = 10000, by=50)
+p=.5
+set.seed(123)
+
+#pull samples
+flips <- list()
+for(i in 1:length(N)){
+flips[i] <- list(rbinom(n = N[i],size = 1, prob = p ))
+}
+
+#calculate raw proportions
+raw_lik <- flips %>% lapply(mean)%>%unlist() 
+
+#calculate likelihoods for every value of N
+MLE<- c(NA)
+  for(i in 2:length(raw_lik)){
+    den<- raw_lik[1:i]%>%density()
+    MLE[i]<-den$x[den$y==max(den$y)]
+  }
+
+#create df to plot
+MLE_df <- data.frame("N_Flips"=N,"Likelihood"= raw_lik, "MLE"=MLE)
+
+#calculate MLE from all samples 
+den<- MLE_df$Likelihood%>%density()
+ans<-round(den$x[den$y==max(den$y)],digits = 3)
+```
+
+  Accuracy changes as N increases. This characteristic is decribed in the Law of Large numbers (LLN). $X \sim {\sf Binom}(N, \pi)$ where X is the number of heads observed in N flips. The sample estimate of the likelihood is the ratio of $\frac{X}{N}$. To find the Maximum likelihood we have to find the maximum of the probability density function. Doing that for every value of N gives us a sample of MLE's for the true value of $\pi$. If we then take the MLE of the sample MLE's then we get **`r ans`**, which is the MLE of $\pi$ given our data.
+  
+```{r 1b plots}
+#visulaize likelihood as it moves
+plot_1b_1<- ggplot(MLE_df, aes(x=N_Flips, y= Likelihood))+
+  mytheme+
+  geom_line(col="blue")+
+  geom_smooth(data = MLE_df%>%filter(Likelihood>.5), aes(x=N_Flips, y= Likelihood), col="coral", lty=2, se = F)+
+  geom_smooth(data = MLE_df%>%filter(Likelihood<.5), aes(x=N_Flips, y= Likelihood),col="coral",lty=2, se = F)+
+  labs(title= "Plot 1 - Likelihood Estimate as N -> Inf", y="Likelihood Estimate", x= "N Flips")
+
+#visulaize likelihood as it moves
+plot_1b_2<-ggplot(MLE_df, aes(x=N_Flips, y= MLE))+
+  mytheme+
+  geom_line(col="blue")+
+  geom_hline(yintercept = p, col="coral", lty=2)+
+  labs(title= "Plot 2 - Maximum Likelihood Estimates as N -> Inf", y="MLE", y= "N Flips")
+
+#visulaize density of MLE's
+plot_1b_3<-ggplot(MLE_df, aes(x= Likelihood))+
+  mytheme+
+  geom_density(col="blue")+
+  geom_vline(xintercept = ans, col="coral", lty=2)+
+  labs(title= "Plot 3 - Likelihood Density Function as N -> Inf", x="Likelihood Estimates", y= "Density")
+
+grid.arrange(plot_1b_1,plot_1b_2,plot_1b_3)
+```
+
+   We see that the plot of likelihood estimates is smoothing out and converging on the limit of $\pi$ = .5. 
+  
+  Plot 2 also shows a differnet perspective of the convergance of the MLE to the limit of $\pi$.
+  
+  If we look at the density function, Plot 3, of these likelihoods we will see that the MLE of **`r ans`** is very close to the true value of $\pi$, *.5*, and intersects with the peak of the density function.   
+  
+
+### 1c. 
+
+Repeat the exercise in 1b using a biased coin with probability $\pi = 0.3$.
+
+```{r 1c, echo=FALSE}
+#set parameters for sampling
+N = seq(from = 50,to = 10000, by=50)
+p=.3
+set.seed(123)
+
+#pull samples
+flips <- list()
+for(i in 1:length(N)){
+flips[i] <- list(rbinom(n = N[i],size = 1, prob = p ))
+}
+
+#calculate raw proportions
+raw_lik <- flips %>% lapply(mean)%>%unlist() 
+
+#calculate likelihoods for every value of N
+MLE<- c(NA)
+  for(i in 2:length(raw_lik)){
+    den<- raw_lik[1:i]%>%density()
+    MLE[i]<-den$x[den$y==max(den$y)]
+  }
+
+#create df to plot
+MLE_df <- data.frame("N_Flips"=N,"Likelihood"= raw_lik, "MLE"=MLE)
+
+#calculate MLE from all samples 
+den<- MLE_df$Likelihood%>%density()
+ans<- round(den$x[den$y==max(den$y)],digits = 3)
+```
+
+```{r 1c plots, echo=FALSE}
+plot_1c_1<- ggplot(MLE_df, aes(x=N_Flips, y= Likelihood))+
+  mytheme+
+  geom_line(col="blue")+
+  geom_smooth(data = MLE_df%>%filter(Likelihood>p), aes(x=N_Flips, y= Likelihood), col="coral", lty=2, se = F)+
+  geom_smooth(data = MLE_df%>%filter(Likelihood<p), aes(x=N_Flips, y= Likelihood),col="coral",lty=2, se = F)+
+  labs(title= "Likelihood Estimate as N -> Inf", y="Likelihood Estimate", x= "N Flips")
+
+#visulaize likelihood as it moves
+plot_1c_2<- ggplot(MLE_df, aes(x=N_Flips, y= MLE))+
+  mytheme+
+  geom_line(col="blue")+
+  geom_hline(yintercept = p, col="coral", lty=2)+
+  labs(title= "Maximum Likelihood Estimate as N -> Inf", y="MLE", y= "N Flips")
+
+plot_1c_3<- ggplot(MLE_df, aes(x= Likelihood))+
+  mytheme+
+  geom_density(col="blue")+
+  geom_vline(xintercept = ans, col="coral", lty=2)+
+  labs(title= "Likelihood Density Function as N -> Inf", x="Likelihood Estimates", y= "Density")
+
+
+grid.arrange(plot_1c_1,plot_1c_2,plot_1c_3)
+
+```
+
+  Again we see the lines converging on $\pi$, where the MLE is **`r ans`**.
+
+## Question 2:  Missing Data
+
+### 2a
+
+Load the **titanic3** data set from the **PASWR** library in R.
+
+```{r 2a}
+head(titanic3)
+```
+
+### 2b
+
+For each variable in the data set, how many values are missing?  Show this as a count and then as a proportion of the sample size.
+
+```{r 2b}
+titanic3%>%apply(2,is.na)%>%colSums()%>%kable(col.names = "# of NA's")
+```
+
+### 2c
+
+For the missing values of age, what would happen if we imputed them (filled the values in) using the mean of the measured values?  Perform the following 3 steps:
+
+* Create a new variable called **age.mi**.  Copy the measured values of age.  Then fill in the missing values with the observed average.
+
+* Plot a histogram of the age variable (without the imputation).
+
+* Plot a histogram of the age.mi variable (with the mean imputation).
+
+Are there any problems with imputing the missing ages in this way?  Provide a brief explanation.
+
+```{r 2c}
+#create new age variable
+titanic3<- titanic3 %>% mutate(age.mi = age)
+
+#impute age NA's with the average age
+titanic3$age.mi[is.na(titanic3$age.mi)]<- mean(titanic3$age,na.rm = T)
+
+plot_2c_1<- ggplot(titanic3, aes(x=age))+
+  mytheme+
+  geom_histogram(fill="lightblue", alpha=.6)+
+  labs(title="Actual Age")
+  
+plot_2c_2<- ggplot(titanic3, aes(x=age.mi))+
+  mytheme+
+  geom_histogram(fill="coral", alpha=.2)+
+  labs(title="Imputed Age With Mean")
+
+grid.arrange(plot_2c_1,plot_2c_2)
+
+```
+
+  There can be problems with imputing missing values with the mean. If the data is a small sample or the proportion of misisng values is large then it overestimates the sample mean making future analysis more bias, as you can see above. An example is if there is a large spread or range of the data, like there is here, then imputing with the mean will increase the density at the mean. 
+  
+  There might also be a reason for the missing data and you can't assume that it is missing at random. Often times there is a reason for missing data which means that if the process can be identified then the ages can be estimated and reduce the bias of your analysis. 
+
+### 2d
+
+Now we will consider a different approach to imputing the missing ages.  Instead of using the mean, we will use random sampling to impute the missing values.  Perform the following 3 steps:
+
+* Create a new variable called **age.si**.  Copy the measured values of age.  Then fill in the missing values by randomly sampling (with replacement) from the measured values.
+
+* Plot a histogram of the age.si variable (with the sampled imputation).
+
+Is this a better approach than mean imputation?  What are some of the drawbacks of random sampling?  Provide a brief explanation.
+
+```{r 2d}
+#create new age variable
+titanic3<- titanic3 %>% mutate(age.si = age)
+
+#impute age NA's with the a sample of age
+titanic3$age.si[is.na(titanic3$age.si)]<- sample(titanic3$age[!is.na(titanic3$age)],size = sum(is.na(titanic3$age)), replace = T)
+
+plot_2d_1<- ggplot(titanic3, aes(x=age.si))+
+  mytheme+
+  geom_histogram(fill="coral", alpha=.2)+
+  labs(title="Imputed Age With Sample")
+
+grid.arrange(plot_2c_1,plot_2d_1)
+
+```
+
+  Sample imputation is nice since it reduces the bias that might be added to the model. However it still assumes that the missing data is random which us a big assumption. If the missing data is due to a specific reason then sample impuation will not increase the bias however it will likeli not reduce it either. Since the sample is being drawn form the observed values the missing values will still be under represented in the sample leading to a bias estimate of the true values of the population.
+
+## Question 3:  Case Study
+
+This question will make use of the **heptathlon** data set in the **HSAUR** library.  This provides the results of the Heptathlon competition at the 1988 Olympic Games.  In the Heptathlon, athletes compete in 7 different events.  Their results are then combined into an overall score, with the highest value determining the winner.
+
+### 3a
+
+Is there enough data to separate the information into training and testing sets?  Why or why not?
+
+```{r 3a}
+data(heptathlon)
+str(heptathlon)
+head(heptathlon)
+
+```
+
+  There are only 25 observations making this a small sample that is limited in its ability to estimate on any parameter. If you were to split this already small data set into training and testing sets then you will have two even smaller sets that are likely to be very biased and cause high variance in your model output. However there are three validation methods that can help reduce the model or prediction error, leave-p-out(LPO), leave-one-out(LOO), and k-fold validation. The two are very different, but will iteratively train and test the small samples and average out the results and minimize the error. For this small data set it might be best to use LOO since it will iterate though every combination minimizing the model error, however it will not reduce the bias caused by haveing such a small data set. (Celisse, 2007)
+  
+### 3b
+
+Using the full data set, fit a linear regression of the overall scores in terms of the 7 events.  Display a summary of the model's coefficients, including the estimates, standard errors, t values, and p-values.
+
+```{r 3b}
+
+hep_mod <- train(score ~ ., method = "lm", data = heptathlon, trControl = trainControl(method = "LOOCV"))
+
+summary(hep_mod)
+```
+
+  I used the LOO cross-validation method to train my model through the caret package. The results are very nice for such few lines of code. All estimates are significant at the 10% level with all but 1 significant at the 1% level.
+  
+### 3c
+
+In the previous model, give an interpretation to the intercept.  Does it make sense for a score in the heptathlon to start with so many points?  Then fit a regression with no intercept (include a "+ 0" in the formula).  Display a summary of the model's coefficients, including the estimates, standard errors, t values, and p-values.  Then briefly compare the results of the two models.
+
+
+```{r 3c}
+#range(heptathlon$score)
+
+hep_mod <- train(score ~ ., method = "lm", data = heptathlon, trControl = trainControl(method = "LOOCV"),tuneGrid  = expand.grid(intercept = FALSE))
+
+summary(hep_mod)
+
+```
+
+  For an intercept to be so large it doesn't make a lot of sense unless you frame the concept of the model. The range of the model is 4566 - 7291 and the intercept doesn't have a simple meaning like "the minimum possible score". In this model there are 7 dimensions and how you visualize the values of score depends on the transformation you make to the variables.
+  
+  As an example, I left out the intercept an re-ran the same model above. You can see that now **hurdles** and **run200m** are nolonger significant variables to the model. However, more tests should be done before removing either of the variables.
+
+### 3d
+
+Some of the results of each model may show negative coefficients for some of the events.  Do these make sense?  Briefly explain why or why not.
+
+  Some of the variable have negative coefficients and this can be explained if you understand how the coefficients are being calculated. The coefficients are being fitted to all values in the data and adusting to best explain the data as a whole not one individual observation. That being said some events are more difficult than others and there are likely events where the majority of athletes perform poorly where others perform much better. This same pattern is likely to occure across the 7 events. Additionaly the way each event is scored is not the same and can case variations across the coefficients.
+
+
+### 3e
+
+The scoring system for the Heptathlon is necessarily somewhat arbitrary.  It tries to combine the results of different kinds of athletic events into a single overall score.  However, it might be good to step back to think about how the competitors relate to each other without an artificial formula.  
+
+Standardize the results for each event x with the formula [x - mean(x)]/sd(x).  Use hierarchical clustering with euclidean distance and average linkage to create a dendrogram of the relationship of the competitors to each other.  Display this in a plot.  If you had to divide the participants into 3 groups, what would these groups be?
+
+```{r 3e}
+hep_names<-row.names(heptathlon)
+heptathlon<- heptathlon%>% transmute_all(.funs = function(x){(x - mean(x))/sd(x)})
+row.names(heptathlon)<-hep_names
+#scale() also standardises the data in the same way
+
+heptathlon_hc<- heptathlon%>%dist()%>%hclust(method = "average")
+
+heptathlon_hc%>%ggdendrogram() + labs(title="Heptathlon")
+
+par(mar=c(3,1,1,5))
+heptathlon_hc%>%
+  as.dendrogram %>%
+  set("branches_k_color", k=3) %>%
+  set("labels_cex", c(.7)) %>% 
+  set("labels_colors",k=3) %>%
+  plot(horiz=T, main= "Heptathlon")
+abline(v=4, col="coral", lwd=2, lty=2)
+```
+
+  If I wanted to separate the people into groups of like athletes, then I would use a cut line on the dendrogram to make 3 groups. This grouping is only based on likeness however if you wanted to create three simlar groups then I would go further by randomly assigning each group to one of three other groups. Doing this will distribute the like groups makeing it more even.
+
+## Question 4:  Theoretical Questions
+
+Answer each question with a short paragraph.
+
+### 4a. What is the difference between supervised and unsupervised learning?
+
+  Supervised learning is the process of creating a model the will classify or predict values based on observed results. The model then fits to the desired results based on the variance of the data. However, unsupervised learning uses no given results and instead uses parameters to optimize on. These parameters are usualy subjective and set based onthe context of the problem. 
+
+
+### 4b. What is the difference between classification and regression?
+
+  Classification is the process of identifying discrete values within a categorical variable. This process calulates a value that reflects the likelihood of belonging to any individual category. That value is then passed through an activation function to classify the observation. The process of regression approximates the mapping function of any number of independent variables. An example is a line that predicts the value of Y on a single X. There are several ways to fit the line, but the most common is to minimize the residuals, represented by the Root Mean Square Error (RMSE).   
+
+
+### 4c
+
+Suppose that you want to predict whether a patient will develop heart disease within the next 5 years.  You have a data set with measurements of height, weight, and cholesterol from 1000 patients.  Each set of measurements was taken on the patient's 40th birthday, and as of the 45th birthday, the data set states whether each patient developed heart disease or not.  What are two techniques that would be appropriate for generating predictions with these data?  
+
+  Technique 1, the first technique would be to group like patients as we assume the pattern of these three variabels are similar in the group with higher risk in developing heart disease. Since we don't have the variable of heart disease, we will have to use unsupervised clustering techniques like DBSCAN or Kmeans. In this case I would use DBSCAN and then inspect the variable trends within the clusters to identify the group with the high risk in developing heart disease.
+
+  Technique 2, Since I know cholesterol is highly correlated with Heart Disease I would use a linear regression model to predict cholesterol on (wieght/height). Since height and weight are highly correlated then combining them into one variable allows me to keep the information of both without reducing the performance of the model.
+
+### 4d 
+
+For the previous scenario, what are two techniques that would not be appropriate for generating predictions with these data?
+
+  Technique 1,logistic regression would not be good since there is no observed variable of heart disease in the data. Classification models requires observed dependent variables howver we don't have this information.
+
+  Technique 2, decission tree would also be a bad technique since it is a supervised learning tachnique just like logistic regression.
+
+
+### 4e
+
+If you are asked to estimate the probability of having skin cancer based on an appropriate data set, and then clasify the cases into diagnoses, which results would you prefer:  more true positives or more false positives?
+
+  This question is a very tricky one. The question gets at the sensativity of the model. You would want more true positives however the sensativity of a model is true positives over predicted wich is the sum of true an false positives. So you want true positives to increase more than false positives.  
+
+### References
+
+Celisse, Alain, and Stéphane Robin. “Nonparametric Density Estimation by Exact Leave-p-out Cross-Validation.” Egyptian Journal of Medical Human Genetics, Elsevier, 7 Oct. 2007, www.sciencedirect.com/science/article/pii/S0167947307003842.
+
+PSU. “1.5 - Maximum-Likelihood (ML) Estimation.” STAT 504 – Analysis of Discrete Data, The Pennsylvania State University, 2018, onlinecourses.science.psu.edu/stat504/node/28/.
+
+Pruim, R. “Mathematics in R Markdown.” 50 Years and Counting: The Impact of the Korean War on the People of the Peninsula, 19 Oct. 2016, www.calvin.edu/~rpruim/courses/s341/S17/from-class/MathinRmd.html.

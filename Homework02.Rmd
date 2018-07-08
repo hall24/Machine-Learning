@@ -1,0 +1,641 @@
+---
+title: "Homework 2"
+author: "Elijah Hall, EH2794"
+date: "`r Sys.Date()`"
+output:
+  prettydoc::html_pretty:
+  theme: cayman
+highlight: github
+---
+```{r setup, include=FALSE}
+library(knitr)
+# opts_chunk$set(echo = TRUE, comment="", warning = FALSE, message = FALSE, tidy.opts=list(width.cutoff=55), tidy = TRUE)
+```
+
+```{r libraries, message=FALSE, warning=FALSE}
+library(datasets)
+library(class)
+#library(ggplot2)
+#library(dplyr)
+library(scales)
+library(reshape2)
+library(flexclust)
+library(ggdendro)
+library(dendextend)
+#library(tidyr)
+library(plotly)
+library(Hmisc)
+library(Sleuth2)
+library(GGally)
+library(grid)
+library(gridExtra)
+library(kableExtra)
+library(tidyverse)
+
+# library(DT)
+# library(ISLR)
+# library(corrplot)
+# library(FNN)
+# library(data.table)
+# library(Metrics)
+
+```
+
+```{r source_files}
+
+```
+
+```{r functions}
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+  require(grid)
+
+  # Make a list from the ... arguments and plotlist
+  plots <- c(list(...), plotlist)
+
+  numPlots = length(plots)
+
+  # If layout is NULL, then use 'cols' to determine layout
+  if (is.null(layout)) {
+    # Make the panel
+    # ncol: Number of columns of plots
+    # nrow: Number of rows needed, calculated from # of cols
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                    ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+}
+```
+
+```{r constants}
+theme_update(plot.title = element_text(hjust = 0.5))
+
+mytheme <- theme_bw()+
+  theme(panel.border = element_blank(),
+        axis.line = element_line(color = 'black'),
+        plot.background = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        plot.title = element_text(hjust = 0.5),
+        axis.title.x = element_text(color="black", size=10),
+        axis.title.y = element_text(color="black", size=10)
+        )
+```
+
+```{r load_data}
+data(iris)
+data(nutrient)
+data(case2002)
+
+```
+
+```{r clean_data}
+
+```
+
+
+**Directions**: please submit your homework as two files -.Rmd and .html - on the Canvas class website. Include short explanations of your code and results throughout.
+
+## Question 1: Bias-Variance Tradeoff (25 points)
+
+###1a:  Diagram
+
+The diagram below illustrates the Bias-Variance Tradeoff.  Different components of the diagram are labeled with the letters A through I.  Fill in each of these labels with the name of the term or a short description.
+
+### 1b. **True** Along the dotted line (D), the value of the curve (A) is equal to the sum of curves (B) and (C).
+
+### 1c. **True** The left side of the equation in Figure 1 (i.e., $E\left[(y - \hat{f}(x))^2\right]$ will never be negative.
+
+### 1d. **False.** In general, we expect $Var(\hat{f}(x))$ in the equation to be smaller when we use more flexible methods.
+
+### 1e. **False** As we move from less flexible to more flexible methods, $[bias(\hat{f}(x))]^2$ will usually not increase.
+
+### 1f. **True** More data will reduce the bias of an estimator.
+
+### 1g. **False.** More data will reduce the variance of an estimator.
+
+## Question 2: K-Means Clustering (25 points)
+
+  We will use clustering to understand the structure of the **iris** dataset. We also will design a program to visually determine the number of clusters. 
+
+### 2a. 
+
+  After loading the **iris** dataset, compute the mean and the standard deviation of each numerical feature.  Then place all of the numerical features into standard units. Explain how the standard deviations of the variables will change on account of this transformation. 
+
+```{r 2a}
+#identify the columns that are numeric
+num_col<-c()
+for(i in 1:ncol(iris)){
+num_col[i]<- is.numeric(iris[,i])
+}
+
+#subset and summarize all numeric variables with mean() and sd()
+iris_mean_sd<-iris[,num_col]%>%
+  summarise_all(.funs = c(mean,sd))
+
+#rename columns to make easier to read
+names(iris_mean_sd)<- c("Sepal.Length.Mean", "Sepal.Length.SD", "Sepal.Width.Mean", "Sepal.Width.SD", "Petal.Length.Mean", "Petal.Length.SD", "Petal.Width.Mean","Petal.Width.SD" )
+
+#print df
+kable(iris_mean_sd[1:4],caption = "Sepal Stats")
+kable(iris_mean_sd[5:8],caption = "Petal Stats")
+```
+
+
+```{r}
+#scale iris numeric variables
+iris_standard<-iris
+iris_standard[,num_col]<- scale(iris[,num_col])
+
+```
+
+```{r}
+#set parameters to output plots
+par(mfrow=c(1,2))
+
+#plot both distributions as denisties
+plot(density(iris_standard[,1]), main = "Scaled",col="lightblue",xlab="")
+plot(density(iris[,1]), main= "Real Values",col="coral",xlab="")
+```
+
+  The standard deviations of the scaled variable now will be 1. Since the scaled values reflect the number of standard deviations away from the mean, running sd() on any of the numeric variables will give the identifity of standard deviation. You can see above that the two distributions are identical, where the scaled one, left, is centered at 0.
+
+### 2b. 
+  
+  Create a scatter plot of the width measurements, and then, separately, a scatter plot of the length measurements. Did you find any correlations?
+
+```{r 2b}
+#change back numeric variables form factors
+par(mfrow=c(1,2))
+
+plot_clust_1 <- ggplot(iris_standard, aes(x=Sepal.Length, y = Petal.Length, color= as.factor(Species)))+
+  mytheme+
+  geom_point()+
+  scale_fill_manual(values=c("#CC6666", "#9999CC", "#66CC99"))+
+  labs(title ="Length by Species", x ="Sepal", y="Petal")+
+  guides(colour = guide_legend(title = "Species",
+                               override.aes = list(size = 4)))
+
+plot_clust_2 <- ggplot(iris_standard, aes(x=Sepal.Width, y = Petal.Width, color= as.factor(Species)))+
+  mytheme+
+  geom_point()+
+  scale_fill_manual(values=c("#CC6666", "#9999CC", "#66CC99"))+
+  labs(title ="Width by Species", x ="Sepal", y="Petal")+
+  guides(colour = guide_legend(title = "Species",
+                               override.aes = list(size = 4)))
+
+grid.arrange(plot_clust_1,plot_clust_2)
+
+```
+
+  There appear to be obvious grouping and strong correlations that appear to be linear.
+
+### 2c.	
+  
+  Construct the K-means algorithm using *kmeans()* function on the standardized dataset with the *k* value of 3.
+
+```{r 2c, message=FALSE, warning=FALSE}
+#use k-fold validation to fix cluster assignments by setting nstart
+irirs_st_clust <- kmeans(iris_standard[,num_col], centers = 3,nstart = 10)
+
+iris_standard$Cluster<- factor(irirs_st_clust$cluster,levels = 1:3)
+
+#find centroids for clusters
+Length_centers<- irirs_st_clust$centers[,c("Sepal.Length", "Petal.Length")]%>% as.data.frame()
+Width_centers<- irirs_st_clust$centers[, c("Sepal.Width", "Petal.Width")]%>% as.data.frame()
+
+allcenters<-cbind(Length_centers, Width_centers)
+allcenters$Species<-as.character(1:3)
+
+#find centroids for species
+iris_act_centers<- iris_standard[,1:5]%>%group_by(Species)%>%summarise_all(mean)
+allcenters<- full_join(iris_act_centers, allcenters)
+
+#calculate difference between centroids
+diffs<- as.matrix(dist(allcenters[,2:4]))
+
+#pair clusters to species groups based on closest centroid
+pairs<- data.frame("Species"=iris_act_centers$Species, "Cluster"=as.character(1:3))
+for (i in 1:3){
+  pairs[i,2]<- which(exp(diffs[-i,i])==  min(exp(diffs[-i,i])))-2
+}
+
+#reorder species by cluster
+pairs<- pairs%>%arrange(Cluster)
+
+
+#reorder levels of species for plotting and pairing colors
+iris_standard$Species<-factor(iris_standard$Species, levels = as.character(pairs$Species))
+
+kable(pairs)
+```
+
+2d.	Inspect the output: i)	Calculate the total within-cluster variance. ii)	Visualize the results against the truth. iii).	Plot the cluster centers over the data for both width and length.
+
+```{r 2d.i}
+
+within_clust<- iris_standard%>%
+  group_by(Cluster)%>%
+  select(which(num_col), Cluster)%>%
+  summarise_all(.funs = c(var))
+
+Species_var<- iris_standard%>%
+  group_by(Species)%>%
+  select(which(num_col), Species)%>%
+  summarise_all(.funs = c(var))
+
+within_clust$Cluster<-factor(within_clust$Cluster, levels = c(2,3,1))
+within_clust<- within_clust%>%arrange(Cluster)
+```
+
+```{r 2d.ii}
+ggplot()+
+  mytheme+
+  geom_jitter( data=melt(within_clust,id.vars="Cluster" ) , aes( x=variable, y = value, col=Cluster))+
+  geom_jitter( data=melt(Species_var,id.vars="Species" ) , aes( x=variable, y = value, col=Species))+   scale_color_manual(values=c("lightcoral", "lightblue","lightgreen", "red", "green", "blue"))+
+  labs(title="Variance of Clusters vs Species", x="", y="Variance")+
+  guides(colour = guide_legend(title = "Cluster and Species",
+                               override.aes = list(size = 2)))
+
+```
+
+```{r 2d.iii}
+
+Length_centers<- irirs_st_clust$centers[,c("Sepal.Length", "Petal.Length")]%>% as.data.frame()
+Width_centers<- irirs_st_clust$centers[, c("Sepal.Width", "Petal.Width")]%>% as.data.frame()
+
+plot_clust_3 <- ggplot()+
+  mytheme+
+  geom_point(data=iris_standard, aes(x=Sepal.Length, y = Petal.Length, color= Cluster))+
+  geom_point(data= Length_centers, aes(x=Sepal.Length, y=Petal.Length ), alpha = .2, size=5)+
+  scale_fill_manual(values=c("#CC6666", "#9999CC", "#66CC99"))+
+  labs(title ="Length by Cluster", x ="Sepal", y="Petal")+
+  guides(colour = guide_legend(title = "Cluster",
+                               override.aes = list(size = 4)))
+
+plot_clust_4 <- ggplot()+
+  mytheme+
+  geom_point(data= iris_standard, aes(x=Sepal.Width, y = Petal.Width, color= Cluster))+
+  geom_point(data= Width_centers, aes(x=Sepal.Width, y=Petal.Width), alpha = .2, size=5)+
+ scale_fill_manual(values=c("#CC6666", "#9999CC", "#66CC99"))+
+  labs(title ="Width by Cluster", x ="Sepal", y="Petal")+
+  guides(colour = guide_legend(title = "Cluster",
+                               override.aes = list(size = 4)))
+
+grid.arrange(plot_clust_1, plot_clust_2, plot_clust_3, plot_clust_4)
+
+```
+
+
+### 2e.	Create the scree plot (via "elbow" method; sum of within-cluster variance vs. *k* value with k ranging from 1 to 10). Determine the plausible number of clusters and explain your reasons.
+
+```{r 2e, message=FALSE}
+tot.withinss<- c()
+for(i in 1:10){
+  irirs_st_clust_test <- kmeans(iris_standard[,num_col], centers = i)
+  tot.withinss[i]<- irirs_st_clust_test$tot.withinss
+}
+
+scree<- data.frame(1:10,tot.withinss)
+names(scree)<- c("centers","tot.withinss")
+ggplot(scree, aes(x=centers, y=tot.withinss))+
+  mytheme+
+  geom_line(col="lightblue")+
+  geom_point(col="dodgerblue2")+
+  labs(title="Scree Plot Iris Clusters", x="Centers",y= "Total Sum of Squares (ESS)")+
+  scale_x_discrete(limits=c(0: 10))
+
+second_d<- c(NA,NA,diff(diff(scree$tot.withinss)))
+
+set_center<- which(max(second_d, na.rm = T)==second_d)
+```
+
+  There are a few different ways to identify the appropriate number of centers. Most choose to use visual intuition however I wanted to quantify my decision. To do this I decided to maximize the second derivative of the Total Explained Sum of Squares (ESS). This will show me where the proportional benefits of adding clusters is maximized. I found that `r set_center`, was the optimal number of centers.
+
+## Question 3: Hierarchical Clustering (25 points)
+
+  The *nutrient* dataset contains the measurements of nutrients in several types of meat, fish, and fowl. We can characterize the nutrients of types of food.  In this example, we are going to group the foods by the common nutrient characteristics  using the Hierarchical Clustering method, *hclust()* and *cutree()* functions. 
+
+### 3a.	Load the **flexclust** library and the *nutrient* dataset.  Print the first 5 rows.
+
+```{r 3a}
+kable(head(nutrient,5))
+```
+
+
+### 3b.	Scale the data and calculate the pairwise distances between the observations. Explain why we need to scale the data. 
+
+```{r 3b}
+#scale the data by standardize method, normalization also use dto scale however is ctransformed to be between 0-1.
+nutrient<-nutrient %>% scale()%>%as.data.frame()
+
+#calculate pairwise distance between the observations
+nutrient_dist<- dist(nutrient)
+
+```
+
+  *Why scale?* Scaling data removes units of measure making it easier to compare numeic variables. This is also very important fro multivariate analysis using various methods including unsupervided ML methods. This helps because numeric variables are measured using different scales and therefore have different contributions to the analysis. This scaling standardizes the range and variability of each variable.
+
+### 3c.	Create separate dendrograms using the following linkages:  **single**, **complete**, and **average**. 
+
+```{r 3c}
+
+#looking for ggplot hclust plot
+nut_s_hc <- nutrient_dist %>% hclust(method = "single") 
+nut_c_hc <- nutrient_dist %>% hclust(method = "complete") 
+nut_a_hc <- nutrient_dist %>% hclust(method = "average") 
+
+nut_den_s <- nut_s_hc %>% ggdendrogram() + labs(title="Single")
+nut_den_c <- nut_c_hc %>% ggdendrogram() + labs(title="Complete")
+nut_den_a <- nut_a_hc %>% ggdendrogram() + labs(title="Average")
+
+nut_den_s
+nut_den_c
+nut_den_a
+
+
+```
+
+
+### 3d.	Cut each of the dendrograms into groups of 5 and display them in plots.
+
+```{r 3d,}
+
+
+dens<- list(nut_s_hc,nut_c_hc,nut_a_hc)
+titles<- c("Single", "Complete", "Average")
+
+for(i in 1:length(dens)){
+par(mar=c(3,1,1,5))
+dens[[i]] %>% 
+  as.dendrogram %>%
+  set("branches_k_color", k=5) %>%
+  set("labels_cex", c(.7)) %>% 
+  set("labels_colors",k=5) %>%
+  plot(horiz=T, main= titles[i])
+}
+
+```
+
+```{r}
+#create cluster assignments
+nutrient$Single_clust <-  as.factor(nut_s_hc %>% cutree(k=5))
+nutrient$Complete_clust <-  as.factor(nut_c_hc %>% cutree(k=5))
+nutrient$Average_clust <-  as.factor(nut_a_hc %>% cutree(k=5))
+
+# bring in row names and re organize columns
+nutrient<- nutrient%>%
+  mutate(Type= row.names(nutrient))
+nutrient<- nutrient[,c(9,1:8)]
+
+#create subset of data for plotting
+sub_nutrient<- nutrient%>%
+  select(1:9)%>%
+  gather(key= method, value = clusters, -1, -2, -3,-4,-5,-6)
+```
+```{r, eval=FALSE, echo=FALSE}
+
+ggplot(sub_nutrient, aes(y=energy, x=protein, col=clusters))+geom_point()+
+  facet_grid(facets = .~method)+
+  labs(title="Groups of 5 (k=5) by Method", x="Protein", y="Energy",color='Cluster')
+
+```
+
+
+### 3e.	Visualize the groups in the dendrogram. 
+
+
+```{r 3e, message=FALSE, warning=FALSE}
+#Create aggregated statistics for visual tables
+z<-c("Single_clust","Complete_clust","Average_clust")
+
+sub_nutrient%>% filter(method==z[1])%>%
+    select(-method,-Type)%>%
+    group_by(clusters)%>%
+    summarize_all(mean)%>%
+    kable(caption = z[1])
+sub_nutrient%>% filter(method==z[2])%>%
+    select(-method,-Type)%>%
+    group_by(clusters)%>%
+    summarize_all(mean)%>%
+    kable(caption = z[2])
+sub_nutrient%>% filter(method==z[3])%>%
+    select(-method,-Type)%>%
+    group_by(clusters)%>%
+    summarize_all(mean)%>%
+    kable(caption = z[3])
+
+
+#Create matrix to use for heatmap
+m<-c()
+for(i in 1:3) {
+  m <- cbind(m, sub_nutrient %>% 
+               filter(method==z[i]) %>% 
+               group_by(clusters)%>% 
+               select(energy,protein,fat,calcium,iron) %>%
+               summarise_all(mean)%>%
+               select(2:6)%>%
+               as.matrix())
+} 
+```
+
+
+### 3f.	Discuss the common nutrient characteristics in each group. 
+
+```{r 3f, message=FALSE, warning=FALSE}
+#change names to identify which method belong to which values
+colnames(m) <- paste0(c(rep("Single_clust",5),rep("Complete_clust",5),rep("Average_clust",5)),"_",colnames(m))
+
+#scale margin for output
+margin <- list(l = 50, r = 50, b = 120, t = 100, pad = 4)
+
+#plot heatmap
+heat_plot_s <- plot_ly(
+    x = capitalize(colnames(m)), y = as.character(1:5),
+    z = m, colorscale = "Greys",type = "heatmap") %>%  
+  layout(title = 'Single_clust Nutrient Characteristics by Cluster',
+         xaxis =list(title = "Nutrient Characteristics"), yaxis =list(title = "Cluster"),margin=margin)
+heat_plot_s
+
+```
+
+  Cluster 5 appears to be the same across methods with very high calcium, cluster 3 in method "single" is most simliar to cluster 4 in both "complete" and "average". Cluster 1 for both "complete" and "average" methods also appear to be similar.
+
+## Question 4: Logistic Regression (25 Points)
+
+Load the **Sleuth2** library and the *case2002* dataset. This dataset reports results of a survey conducted from 1972 to 1981 in the Netherlands aiming to see if birdkeeping is a risk factor for lung cancer. Variables include whether or not an individual had lung cancer, whether or not they were birdkeeping, their gender, socioeconomic status, age, years of smoking, and average rate of smoking. 
+
+Randomly sample observations into the training set making an 80:20 spit with the remaining rows as the testing set.
+
+### 4a. Perform basic EDA comment on the scatterplots of the continuous variables colored by whether or not an individual had lung cancer. 
+
+```{r 4a}
+#assign training index
+train<- sample(1:nrow(case2002),100)
+
+#sacle data through standardization
+case2002[,5:7]<- scale(case2002[,5:7])
+
+#convert to factor other binary categorical variables columns 1:4
+for(i in 1:4){ 
+  case2002[i] <- as.factor(case2002[,i])
+}
+
+```
+
+```{r otions for 4a, eval=FALSE, echo=FALSE}
+#option 1
+# case2002[train,]%>%
+#   select(LC,AG,YR,CD)%>%
+#   gather(key="factor",value="value",-LC)%>%
+#   ggplot(aes(x=value,y=value, color=factor(LC)))+
+#     geom_point()+
+#     facet_wrap(.~factor)
+
+
+#option 2
+case2002[train,]%>%
+  ggplot(aes(x=AG,y=YR, color=factor(LC)))+
+    geom_point()+
+  geom_point(aes(x=CD, color=factor(LC)))+
+    facet_wrap(~LC)
+
+#option 3
+ggpairs(case2002,
+        columns = c("AG","YR","CD"),
+         mapping=ggplot2::aes(colour = LC, alpha=.8),
+        lower=list(continuous='points'),
+        upper=list(continuous='blank'))
+```
+
+```{r best scatterplot for 4a}
+#option 4, best visualization for this question
+scatplot_1<- case2002[train,]%>%
+  ggplot(aes(x=AG,y=YR, color=factor(LC)))+
+    geom_point()+
+    theme(legend.position = "none")
+
+scatplot_2<- case2002[train,]%>%
+  ggplot(aes(x=CD,y=YR, color=factor(LC)))+
+    geom_point()+
+    guides(colour = guide_legend(title = NULL))
+
+scatplot_3<- case2002[train,]%>%
+  ggplot(aes(x=AG,y=CD, color=factor(LC)))+
+    geom_point()+
+    theme(legend.position = "none")
+
+grid.arrange(
+  scatplot_1,scatplot_2,scatplot_3)
+
+```
+
+
+### 4b.  Fit a logistic regression predicting an individual has lung cancer that includes all variables in the model. Compute the model's Mean Squared Error on the testing set.
+
+```{r 4b}
+
+for(i in 1:4){
+case2002[,i] <- as.factor(as.numeric(case2002[,i])-1) 
+}
+ # 1= LungCaner, 0= NoCancer
+ # 1= Female,    0= Male
+ # 1= High,      0= Low
+ # 1= Bird,      0= NoBird
+
+
+#model 1
+log_mod_1 <- glm(formula = LC~., family = binomial(),data = case2002[train,])
+log_pred_1 <- predict(object = log_mod_1, case2002[-train,],type="response")
+mse_mod_1<-mean((as.numeric(case2002$LC[-train]) - 1 -log_pred_1)^2)
+print(paste("The Mean Squared Error (MSE) for model 1 is",round(mse_mod_1,digits = 3)))
+```
+
+### 4c.	Fit a logistic regression predicting an individual has lung cancer that includes all variables in the model except socioeconomic status. Compute the model's Mean Squared Error on the testing set.
+
+```{r 4c}
+log_mod_2 <- glm(formula = LC~., family = binomial(),data = case2002[train,-3])
+log_pred_2 <- predict(object = log_mod_2,case2002[-train,],type="response")
+mse_mod_2 <- mean((as.numeric(case2002$LC[-train])- 1 - log_pred_2)^2)
+print("The Mean Squared Error (MSE) for model 2 is",mse_mod_2)
+```
+
+### 4d.	Fit a logistic regression predicting an individual has lung cancer based on socioeconomic status and the number of years that the person has smoked. Compute the model's Mean Squared Error on the testing set.
+
+```{r 4d}
+log_mod_3 <- glm(formula = LC~SS+YR, family = "binomial",data = case2002[train,])
+log_pred_3 <- predict(object = log_mod_3,case2002[-train,],type="response")
+mse_mod_3 <- mean((as.numeric(case2002$LC[-train]) - 1 - log_pred_3)^2)
+print("The Mean Squared Error (MSE) for model 3 is",mse_mod_3)
+
+#include on last model based on anova results from 4b
+log_mod_4 <- glm(formula = LC~BK+YR, family = "binomial",data = case2002[train,])
+log_pred_4 <- predict(object = log_mod_4,case2002[-train,],type="response")
+mse_mod_4 <-mean((as.numeric(case2002$LC[-train]) - 1 - log_pred_4)^2)
+print("The Mean Squared Error (MSE) for model 4 is",mse_mod_4)
+
+```
+
+
+### 4e.  Which model provides the best predictions of lung cancer status?
+
+```{r 4e}
+MSE_df<-data.frame("Model"= 1:4, "MSE"=c(mse_mod_1,mse_mod_2,mse_mod_3,mse_mod_4))
+MSE_df
+```
+
+  Model 1 and 2 have the lowest MSE out of the ones in problem 4's questions. 
+  
+### One last thing...
+  
+  I wanted to visualize the improvements on the different models using different cutoffs and accuracy.
+
+```{r, echo=FALSE}
+
+models_pred<- list(log_pred_1,log_pred_2, log_pred_3, log_pred_4)
+
+#create data frame to plot all accuracy results with various cutoffs for classification
+acur<-c()
+pred<-c()
+acur_df<- data.frame("Cutoff"=rep(0,20),"Model_1"=rep(0,20),"Model_2"=rep(0,20), "Model_3"=rep(0,20), "Model_4"=rep(0,20))
+
+for(j in 1:20){
+  for(i in 1:length(models_pred)){
+    pred[[i]]<- ifelse(models_pred[[i]] > .05*j,1,0)
+    acur[i]<- 1-mean(pred[[i]] != case2002$LC[-train])
+  } 
+  acur_df[j,]<-c(j,acur)
+}
+
+#plot accuracy to compare models
+ggplot(melt(data = acur_df, id.vars = "Cutoff"), aes(x=c(Cutoff*.05), y=value, color=variable))+
+  mytheme+
+  geom_line()+
+  labs(title="Model Accuracy", x="Classification Cutoff",y="Accuracy" )+
+  scale_color_discrete(name="")
+```
+
+```{r ,}
+
+first_perf<- c()
+for(i in 2:5){
+first_perf[i-1]<- min(which(acur_df[,i]== max(acur_df[,i])))
+}
+
+best<- names(acur_df)[which(first_perf==min(first_perf))+1]
+
+```
+
+  Model 3 with socioeconomic status and the number of years that the person has smoked gives the best predictions with accuracy of *68%* which is better than others with cutoff at *.5*.However when evaluating the right cutoff,  has the best performance out of all models tested with a cutoff at `r min(first_perf)*.05`. It also happens to have the lowest MSE as seen in the table above.
+
+```{r eval=FALSE, echo=FALSE}
+
+library(ROCR)
+p <- predict(log_mod_3, newdata= case2002[-train,],type="response")
+pr[[1]] <- prediction(p, case2002$LC[-train])
+prf <- performance(pr, measure = "tpr", x.measure = "fpr")
+plot(prf)
+
+auc <- performance(pr, measure = "auc")
+auc <- auc@y.values[[1]]
+auc
+```
+
