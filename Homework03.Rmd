@@ -1,0 +1,679 @@
+---
+title: "Homework 3 Solutions"
+author: "Elijah Hall, EH2794"
+date: "`r Sys.Date()`"
+output:
+  prettydoc::html_pretty:
+  theme: cayman
+highlight: github
+---
+```{r setup, include=FALSE}
+library(knitr)
+opts_chunk$set(echo = TRUE, comment="", warning = FALSE, message = FALSE, tidy.opts=list(width.cutoff=55), tidy = TRUE)
+```
+
+```{r libraries, message=FALSE, warning=FALSE}
+library(tidyverse)
+library("MASS", lib.loc="C:/Program Files/R/R-3.5.0/library")
+library(GGally)
+library(moments)
+library(nortest)
+library(e1071)
+library(data.table)
+library(ggdendro)
+library(dendextend)
+library(ROCR)
+library(car)
+library(class)
+
+# library(datasets)
+
+# #library(ggplot2)
+# #library(dplyr)
+# library(scales)
+# library(reshape2)
+# library(flexclust)
+# #library(tidyr)
+# library(plotly)
+# library(Hmisc)
+# library(Sleuth2)
+# library(grid)
+# library(gridExtra)
+# library(kableExtra)
+
+```
+
+```{r source_files}
+
+```
+
+```{r functions}
+ #find optimal cutoff rate, https://www.r-bloggers.com/a-small-introduction-to-the-rocr-package/
+opt.cut = function(perf, pred){
+    cut.ind = mapply(FUN=function(x, y, p){
+        d = (x - 0)^2 + (y-1)^2
+        ind = which(d == min(d))
+        c(sensitivity = y[[ind]], specificity = 1-x[[ind]], 
+            cutoff = p[[ind]])
+    }, perf@x.values, perf@y.values, pred@cutoffs)
+}
+```
+
+```{r constants}
+theme_update(plot.title = element_text(hjust = 0.5))
+
+mytheme <- theme_bw()+
+  theme(panel.border = element_blank(),
+        axis.line = element_line(color = 'black'),
+        plot.background = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        plot.title = element_text(hjust = 0.5),
+        axis.title.x = element_text(color="black", size=10),
+        axis.title.y = element_text(color="black", size=10)
+        )
+```
+
+```{r load_data}
+data(cats)
+cig_sales<- fread("cig_sales.txt")
+echogen<- fread("echogen.txt")
+data(iris)
+```
+
+```{r clean_data}
+
+cats$Sex.Bin<- as.character(cats$Sex)
+cats$Sex.Bin[cats$Sex=="M"]<-1
+cats$Sex.Bin[cats$Sex=="F"]<-0
+cats$Sex.Bin<- as.factor(cats$Sex.Bin)
+
+echogen<- echogen[sample(x =1:nrow(echogen)),]
+```
+## Question #1 Linear Regression, Logistic Regression: Load the *cats* dataset from the **MASS** library. This dataset includes the body and heart rates of both male and female adult domestic cats. 
+
+### 1a. Determine the size of dataset, the missing rows, and randomize data.
+
+```{r 1a , message=FALSE, warning=FALSE}
+head(cats)
+str(cats)
+summary(cats)
+
+#create random index
+idx<- sample(nrow(cats))
+
+#reorder dataset
+cats<- cats[idx,]
+
+```
+
+There are 144 cats in this data set. Bwt I assume is the body weight and Hwt I assume is the heart weight. The problem is that the values are not what I would expect. I found the units for these two variables online. Body weight is measured in kilograms(Kg) while heart weight is measured in grams(g).
+
+### 1b. Create a scatterplot of heart weight versus body weight. Explain if simple linear regression may be a good fit. How does the data satisfy the assumptions of linear regression? 
+```{r 1b inspecting lm assumptions , message=FALSE, warning=FALSE}
+
+ggplot(cats, aes(x=Hwt, y=Bwt))+geom_point(col="darkblue")+
+  mytheme+
+  labs(title="Cats Body Weight by Heart Weigt", x= "Heart Weight (g)", y= "Body Weight (Kg)")
+  
+```
+
+Looking at the plot of the data appears to be linear. However we know that there is a categorical variable of Sex and the two groups are likely to be different.
+
+```{r lm Assumption 1}
+  ggpairs(cats,columns = c("Bwt","Hwt"))
+  ggpairs(cats,columns = c("Bwt","Hwt"), mapping=ggplot2::aes(colour = cats$Sex, alpha=.8))
+```
+
+Inspecting the five asusmptions of linear regression. 1) The data appears to be linear in realationship as a whole with a correlation of .8, however when you consider the different sexes that perceptoion changes a bit. 
+
+```{r lm Assumption 2}
+Bwt_F <- cats%>%as.data.frame()%>%filter(Sex=="F")%>%dplyr::select(Bwt)%>%scale()
+Bwt_M <- cats%>%as.data.frame()%>%filter(Sex=="M")%>%dplyr::select(Bwt)%>%scale()
+
+#----Assumption 2----
+# testing nromal assumptions
+# https://stats.stackexchange.com/questions/52293/r-qqplot-how-to-see-whether-data-are-normally-distributed/52295
+
+# skewness and kurtosis, they should be around (0,3)
+skewness(Bwt_F)
+kurtosis(Bwt_F)
+skewness(Bwt_M)
+kurtosis(Bwt_M)
+
+```
+
+Skewness and kurtosis should between 0 and 3. The two values are right more or less on the edge of 0.  The null hypothesis for Shapiro-Wilks, Kolmogorov-Smirnov, and Anderson-Darling tests are that the data are normally distributed. If the chosen alpha level is 0.05 and the p-value is less than 0.05, then the null hypothesis that the data are normally distributed is rejected.
+
+```{r}
+#Shapiro-Wilks test
+shapiro.test(Bwt_F)
+# Kolmogorov-Smirnov test
+ks.test(Bwt_F,"pnorm",mean(Bwt_F),sqrt(var(Bwt_F)))
+# Anderson-Darling test
+ad.test(Bwt_F)
+#Shapiro-Wilks test
+shapiro.test(Bwt_M)
+# Kolmogorov-Smirnov test
+ks.test(Bwt_M,"pnorm",mean(Bwt_M),sqrt(var(Bwt_M)))
+# Anderson-Darling test
+ad.test(Bwt_M)
+```
+
+Looking at the Q-Q plot will also help determine normality.
+
+```{r}
+# qq-plot: you should observe a good fit of the straight line
+qqnorm(Bwt_F)
+qqline(Bwt_F)
+
+qqnorm(Bwt_M)
+qqline(Bwt_M)
+```
+
+2) As to the normality assumption we can perform normality tests s.t. the null hypothesis is that the data is normaly distributed. Doing that we see p-values that are not beyond the general .05 level of significance. Therefore we do not reject the null hypothesis that Hwt is normaly distributed. Inspecting the Q-Q plot for Female cats we see that the data on both ends diverge from the line showing some deviation from normality. 
+
+```{r lm Assumption 3 & 4}
+
+#----Assumption 4----
+
+mod<- lm(Hwt~Bwt, data = cats)
+summary(mod$residuals)
+
+durbinWatsonTest(lm(Hwt~Bwt, data = cats))
+
+```
+
+3) Since there is only one independent variable assumption 3 of little or no multicolinearity doesn't need to be proven. 
+
+4) As for auto correlation the Durbin Watson Test computes residual autocorrelations from the linear model. The p-value is very high meaning we don't reject the null hypothesis of no serial correlation. 
+
+```{r lm Assumption 5}
+ggplot(cats, aes(x=Bwt, y=Hwt, col=Sex))+geom_point()+
+  mytheme+
+  facet_wrap(~Sex)+
+  labs(title="Cats Body Weight by Heart Weigt", y= "Heart Weight (g)", x= "Body Weight (Kg)")
+```
+
+5) The last assumption of homoscedasticity can be checked visually. We see that the plots by sex are both homoskedastic, meaning that the spread across the data remains constent as you move from left to right.     
+
+### 1c. Write out the linear regression equation of heart weight onto body weight and interpret the equation. Explain how the coefficients and the overall regression are significant. Find and interpret the residual standard error. Find and interpret the coefficient of determinations. 
+
+The linear equation for heart weight onto body weight is $Hwt = \alpha + \beta \times Bwt + \varepsilon$. The alpha beta is the intercept term which can be interpreted as the Heart weight at the time the body develops, however this is difficult to accept since all cells develop through a natural process where the heart and body will start at near 0. Beta is the amount of Heart weight in grams that increases for every additional kilogram in body weight. The error term is the residual value and the amount of heart weight not explained by the linear model for each observation.
+```{r  , message=FALSE, warning=FALSE}
+summary(mod)
+
+```
+
+### 1d. Splitting 70% of the data for the training data. Identify how many observations the training and testing datasets have. 
+
+```{r  , message=FALSE, warning=FALSE}
+set.seed(123)
+train<- sample(1:nrow(cats), size = round(.70*nrow(cats)))
+
+```
+
+The training set has `r length(train)` observations while the testing set has `r nrow(cats)-length(train)`. There are no missing values in the data.
+
+### 1e. Do the logistic regression and estimate the success rate of prediction. 
+
+```{r  , message=FALSE, warning=FALSE}
+mod1<- glm(formula = Sex.Bin~Bwt+Hwt,family = binomial(),data = cats[train,2:4])
+summary(mod1)
+pred_mod1<-predict(object = mod1, newdata = cats[-train,2:4],type ="response" )
+
+error<- cats[-train,4]%>%as.character()%>%as.numeric() - pred_mod1
+
+RMSE<- sqrt(mean(error^2))
+#paste("RMSE =", round(RMSE, digits = 3))
+
+
+#miss classification
+accuracy<- mean(cats[-train,4] ==ifelse(pred_mod1>.5, 1,0))
+#paste("Accuracy =", round(accuracy, digits = 3))
+```
+
+It should be noted that the p-value for Hwt is not significant. This is due to its strong collinearity with Bwt. The `r paste("RMSE =", round(RMSE, digits = 3))` and `r paste("Accuracy =", round(accuracy, digits = 3))`.
+
+### 1f. How would the result change if you use just the body weight?
+
+```{r  , message=FALSE, warning=FALSE}
+mod2<- glm(formula = Sex.Bin~Bwt,family = binomial(),data = cats[train,2:4])
+summary(mod2)
+pred_mod2<-predict(object = mod2, newdata = cats[-train,2:4],type ="response" )
+
+error<- cats[-train,4]%>%as.character()%>%as.numeric() - pred_mod2
+
+RMSE2<- sqrt(mean(error^2))
+RMSE2
+
+#miss classification
+accuracy2<- mean(cats[-train,4] ==ifelse(pred_mod2>.5, 1,0))
+accuracy2
+```
+
+The estimates for the models are different however the RMSE and accuracy of both models are not, `r paste("RMSE =", round(RMSE2, digits = 3))` and `r paste("Accuracy =", round(accuracy2, digits = 3))`. The reason for this is assumption 3 of a linear model. The two independent variables Bwt and Hwt have a strong correlation to eachother. Removing one therefore doesn't change the overall effectiveness of the model but gives better and more accurate estimates. 
+
+## Question #2 Multiple Linear Regression, Hierarchy Clustering: Find the file called *cig_sales.txt* under **HW#3** and load it. Using the file, we can explore cigarette sales as a function of various demographic information. 
+
+### 2a. Discuss about the data: verify qualitative and quantitative variables, determine the highest and lowest sales state, and estimate the average and standard deviation of age, price, and income. Identify any correlated variables with sales from a scatterplot matrix.
+
+```{r , message=FALSE, warning=FALSE}
+summary(cig_sales)
+
+#high and low sales
+high<- cig_sales[cig_sales$Sales == max(cig_sales$Sales),]
+low<- cig_sales[cig_sales$Sales == min(cig_sales$Sales),]
+
+#estimate the average and standard deviation of age, price, and income
+Avg<-cig_sales%>%as.data.frame()%>%dplyr::select(Age, Price, Income)%>%summarise_all(mean)
+Sd<- cig_sales%>%as.data.frame()%>%dplyr::select(Age, Price, Income)%>%summarise_all(sd)
+
+est_df<- rbind(Avg,Sd)
+rownames(est_df)<- c("Avg", "StdDev")
+kable(est_df)
+```
+
+**State** is a categorical variable and has all 50 states plus DC. All other variables are quantitative. **Age** range is from 22.90 to 32.30 years which seems very specific and narrow. **HS** appears to be the % of high school graduates by state ranging from 37.8 to 67.30. **Income** is difficult to interpret the units. It appears to be average monthly income in dollars. **Black** appears to be the proportion of african americans in the state. Similarly **Female** is the proporiton of females in the state where $Male = 1 - Female$ is the proportion of males in the state. **Price** is difficult to interpret as well. It might be price per carton since the minimum is much to high for a pack. **Sales** appears to be average sales but is hard to interpret as to whether it is cartons by year, annual $, or packs per person.  
+
+The state with the highest sales is **`r high$State`** with sales of **`r high$Sales`**. The state with the lowest sles is **`r low$State`** with sales of **`r high$Sales`**.
+
+```{r}
+ggpairs(cig_sales[,-1])
+```
+
+The correlations with Sales are Age = 0.227, HS = 0.0667, Income = 0.326, Black = 0.19, Female = 0.146, and Price = -0.301. Some of these correlations seem to be pulled by groups of outliers.
+
+### 2b. Do a multiple linear regression using sales as your responsible variable. Discuss how you would treat the State variable. Produce a summary of the fit and interpret the results (e.g., the residual standard error, the overall regression, etc.). 
+
+```{r , message=FALSE, warning=FALSE}
+library(caret)
+cig_sales$State<- cig_sales$State%>%as.factor()
+hep_mod <- train(Sales ~ ., method = "lm", data = cig_sales[,-1], trControl = trainControl(method = "LOOCV"))
+
+summary(hep_mod)
+```
+
+If I were to include **State** as an independent variable, I would want to create 50 binary variables using Washington DC as the reference state. This way the beta would be activated for whichever state the observation is from. The problem with doing that with this data is that we only have one pobservation for each state. If we had previous observations over time this would give us better data to understand the influence of each variable specific to each state. 
+
+This linear model as is shows only price to be statistically significant with the intercept being very high. The residual standard error is also very high at 28.17 meaning that about 96% of observations fall between + or - 56.34. This is not very accurate which is also shown in the Multiple R-squared and adusted R-squared of 0.32 and 0.22. These values represent the proportion of variance in the data explained by the model and the same adjusted for multiple predictors respectively. A lot of these variables have strong correlation to eachother which is likely impacting the fit of this model. Even though the model appear to be performing poorly it is still better than an intercept only model which is what the p-value of the model is telling us. Since the p-value is significant we reject the null hypothesis that the data is explained by an intercept only model. A good strategy would be to combine the variables with high correlation to eachother or remove one. 
+
+### 2c. What happens to the sales when the price goes up by a dollar per carton.
+
+Sales decrease by 3.25 when price goes up by a dollar per carton.
+
+### 2d. Explain if females buy more cigarettes than males. 
+
+Females buy less than males. This is demonstrated by the fact that if the females population increases there is an expected decrease in sales by 1.05 per precentage point.
+
+### 2e. Scale the data and calculate the pairwise distance between observations. Create various dendrograms using complete and average linkage. Cut the dendrogram into groups of 3, 4, 5, and 6. Discuss which is the most appropriate number of groups. Discuss the common features by groups. 
+
+```{r  , message=FALSE, warning=FALSE}
+cig_sales_scale<- cig_sales[,-1]%>%as.data.frame()
+idx_fac<-cig_sales[,1]%>%unlist()%>%as.numeric()
+rownames(cig_sales_scale)<- levels(cig_sales$State)[idx_fac]
+
+cig_sales_scale<- cig_sales_scale%>%scale()%>%as.data.frame()
+
+cig_sales_dist<-cig_sales_scale%>%dist()
+
+
+cig_sales_c_hc <- cig_sales_dist %>% hclust(method = "complete") 
+cig_sales_a_hc <- cig_sales_dist %>% hclust(method = "average") 
+
+
+dens<- list(cig_sales_c_hc,cig_sales_a_hc)
+titles<- c("Complete", "Average")
+
+for(i in 1:length(dens)){
+  for( k in 3:6){
+par(mar=c(3,1,1,2))
+dens[[i]] %>% 
+  as.dendrogram %>%
+  set("branches_k_color", k=k) %>%
+  set("labels_cex", c(.7)) %>% 
+  set("labels_colors",k=k) %>%
+  plot(horiz=T, main= paste(titles[i], ": Cut = ", k))
+}
+}
+```
+
+The **Complete** method appears to cut the groups into larger more informative clusters once you go beyond 4 however Average is mostly grouped into one cluster with only 1 or 2 in the other clusters. I will use a judgemnet call to use the Complete cluster method with 5 clusters, k=5.
+
+```{r variance within clusters, eval=FALSE, echo=FALSE}
+cig_sales$C_Cut_3<-cig_sales_c_hc%>%cutree(k=3)%>%as.factor()
+cig_sales$C_Cut_4<-cig_sales_c_hc%>%cutree(k=4)%>%as.factor()
+cig_sales$C_Cut_5<-cig_sales_c_hc%>%cutree(k=5)%>%as.factor()
+cig_sales$C_Cut_6<-cig_sales_c_hc%>%cutree(k=6)%>%as.factor()
+
+cig_sales$A_Cut_3<-cig_sales_a_hc%>%cutree(k=3)%>%as.factor()
+cig_sales$A_Cut_4<-cig_sales_a_hc%>%cutree(k=4)%>%as.factor()
+cig_sales$A_Cut_5<-cig_sales_a_hc%>%cutree(k=5)%>%as.factor()
+cig_sales$A_Cut_6<-cig_sales_a_hc%>%cutree(k=6)%>%as.factor()
+
+cig_sales_scale$C_Cut_3<-cig_sales_c_hc%>%cutree(k=3)%>%as.factor()
+cig_sales_scale$C_Cut_4<-cig_sales_c_hc%>%cutree(k=4)%>%as.factor()
+cig_sales_scale$C_Cut_5<-cig_sales_c_hc%>%cutree(k=5)%>%as.factor()
+cig_sales_scale$C_Cut_6<-cig_sales_c_hc%>%cutree(k=6)%>%as.factor()
+
+cig_sales_scale$A_Cut_3<-cig_sales_a_hc%>%cutree(k=3)%>%as.factor()
+cig_sales_scale$A_Cut_4<-cig_sales_a_hc%>%cutree(k=4)%>%as.factor()
+cig_sales_scale$A_Cut_5<-cig_sales_a_hc%>%cutree(k=5)%>%as.factor()
+cig_sales_scale$A_Cut_6<-cig_sales_a_hc%>%cutree(k=6)%>%as.factor()
+
+
+ag.cols<-c( "Age","HS","Income","Black","Female","Price","Sales")
+
+temp<-data.frame(rep(0,8))
+names(temp)<-ag.cols
+for(i in 8:15){
+  i=9
+x<- cig_sales_scale%>%group_by(cig_sales_scale[,i])%>%dplyr::select(ag.cols)%>%summarise_all(var)
+temp[(i-7),]<-x%>%na.omit()%>%summarise_all(mean)
+}
+
+```
+
+```{r}
+cig_sales_scale$C_Cut_5<-cig_sales_c_hc%>%cutree(k=5)%>%as.factor()
+ag.cols<-c( "Age","HS","Income","Black","Female","Price","Sales")
+
+temp<- cig_sales_scale%>%group_by(C_Cut_5)%>%dplyr::select(ag.cols)%>%summarise_all(mean)
+temp<- temp%>%gather(key="Variable", value="Value",-C_Cut_5)
+temp$C_Cut_5<- as.factor(temp$C_Cut_5)
+temp$Variable<- as.factor(temp$Variable)
+
+ggplot(temp , aes(x=C_Cut_5, y=Value,  fill=C_Cut_5))+geom_bar(stat = "identity",position = "dodge")+facet_wrap(~Variable)
+
+```
+
+Cluster 4 can be characterized as high income, african amarican women. Cluster 2 can be labled younger, middle class, educated men. Where cluster 4 has the lowest price and second highest sales. Cluster 5 has the highest sales and is second highest in eduction. 
+
+## Question #3 KNN, Kmean: Download the file *echogen.txt* from Canvas. These data are from a study evaluating cancer in dogs and can be used to answer the question, *are dogs' lymph nodes benign or malignant?* The predictors reflect several associated ultrasonography measurements. The study's objective was to evaluate use of ultrasound to characterize lymph nodes in dogs. The six variables in these data include, Echogen, Flowdist, meanPI, meanRI, Lyadpati, and diagtype. The predictor diagtype is a target indicator variable, where 1 indicates malignant and 0 indicates benign.
+```{r  , message=FALSE, warning=FALSE}
+
+summary(echogen)
+```
+
+### 3a. Divide these data into a training set (119 rows) and a testing set (58 rows). Remember to randomize your data before you do the split. Perform a logistic regression using the training set. Compute numerical and graphical summaries of the data. What patterns, if any, are present? Which of the predictors, if any, appear to be most important? Compute a confusion matrix and an overall number of correct predictions on the training data. What types of errors were shown in the confusion matrix. (Again, refer to page 145 in ISL for help with confusion matrices.)
+
+```{r , message=FALSE, warning=FALSE}
+set.seed(123)
+train2<- sample(x =1:nrow(echogen) ,size = 119)
+
+ggpairs(echogen, mapping=ggplot2::aes(colour = factor(echogen$diagtype), alpha=.8))
+
+logmod<-glm(formula = diagtype~Flowdist + Echogen + meanPI,family = "binomial",data = echogen[train2,] )
+summary(logmod)
+```
+
+The variables that seem to explain the most visually are Flowdist, meanRI, meanPI, and Echogen however meanRI and meanPI have a strong correleation so I will will only use one in my model. The results show all Flowdist, Echogen, and meanPI to be statistically significant with p-values below 1%. The scatter plot matrix also show very specifc boundaries on some variables such as Flowdist v meanPI and Flowdist v Echogen.
+```{r}
+#compute training predictions to set optimal cutoff
+logpred<- predict(object =logmod,newdata = echogen[train2,],type="response" )
+#create objects to plot ROC and 
+pr <- prediction(logpred, as.numeric(echogen$diagtype[train2]))
+prf <- performance(pr, measure = "tpr", x.measure = "fpr")
+#set cutoff
+cutoff<- opt.cut(prf, pr)[3,1]
+
+#plot ROC with cutoff
+plot(prf, col="blue")
+abline(a=0, b= 1)
+abline(v = cutoff, lty=2, col="coral")
+
+#find AUC
+auc <- performance(pr, measure = "auc")
+auc <- auc@y.values[[1]]
+
+#inspect confusion matrix
+confusionMatrix(factor(ifelse(logpred >cutoff, 1,0)), 
+                factor(echogen$diagtype[train2]), positive = "1",
+                dnn = c("Prediction", "Reference"))
+
+total_train<- sum(factor(ifelse(logpred >cutoff, 1,0)) ==  factor(echogen$diagtype[train2]))
+```
+
+When looking at the confusion matrix there are twice as many false negatives as false positives. Here is where the cost benefit to False Negatives needs to be analyzed to help ensure that the optimum cutoff point is in the right place. The model accurately predicts **`r total_train`** of `r length(train2)` correctly. The accuracy rate is  **85%**, sensativity (True Positives over Predicted Postives) of **78%** and specificity (True Negative over Predicted Negative) of **91%**. 
+
+### 3b. Run your trained logistic model to the test data. Compute accuracy and a confusion matrix. Again, explain the confusion matrix. How do your results here compare with those on the training set?
+
+```{r  , message=FALSE, warning=FALSE}
+#compute training predictions to set optimal cutoff
+logpred2<- predict(object =logmod,newdata = echogen[-train2,],type="response" )
+#create objects to plot ROC and 
+pr2 <- prediction(logpred2, as.numeric(echogen$diagtype[-train2]))
+prf2 <- performance(pr2, measure = "tpr", x.measure = "fpr")
+
+#plot ROC with cutoff
+plot(prf2, col="blue")
+abline(a=0, b= 1)
+abline(v = cutoff, lty=2, col="coral")
+
+#find AUC
+auc2 <- performance(pr2, measure = "auc")
+auc2 <- auc2@y.values[[1]]
+
+#inspect confusion matrix
+confusionMatrix(factor(ifelse(logpred2 >cutoff, 1,0)), 
+                factor(echogen$diagtype[-train2]), positive = "1",
+                dnn = c("Prediction", "Reference"))
+
+total_test<- sum(factor(ifelse(logpred2 >cutoff, 1,0)) ==  factor(echogen$diagtype[-train2]))
+```
+
+By looking at the confusion maktrix the model had 3 False Negative and 1 False Positive. The accuracy rate is **93%** with a sensativity and specificity of **87%** and **97%** respectively. The total accurate predictions is **`r total_test`** of 58. These results are better than that of the training set.
+
+### 3c. Repeat your analysis using **KNN** where k=1, 4, 7, and 10. Calculate the number of misclassifications for each K values. 
+
+```{r  , message=FALSE, warning=FALSE}
+ks<-c(1,4,7,10)
+knn_pred<-c()
+missclass<-c()
+for(i in 1:length(ks)){
+knn_pred <- knn(train = echogen[train2,],
+    test = echogen[-train2,],
+    k = ks[i],
+    cl =echogen$diagtype[train2])
+missclass[i]<- sum(factor(knn_pred) !=  factor(echogen$diagtype[-train2]))
+}
+kable(missclass,caption = "Miss Classifications for K= 1,4,7, and 10")
+```
+
+For all values I get 0 miss-classifications.
+
+### 3d. Using the **Kmean** clustering method, determine the appropriate number of clusters. Tabulate the number of clusters from 1 to 40 and the total within-cluster variances. Plot the scree plot to visually support your decisions on the cluster number. 
+
+```{r  , message=FALSE, warning=FALSE}
+tot.withinss<- c()
+for(i in 1:40){
+  echo_km <- kmeans(echogen[,], centers = i,nstart = 10)
+  tot.withinss[i]<- echo_km$tot.withinss
+}
+
+scree<- data.frame(1:40,tot.withinss)
+names(scree)<- c("centers","tot.withinss")
+ggplot(scree, aes(x=centers, y=tot.withinss))+
+  mytheme+
+  geom_line(col="lightblue")+
+  geom_point(col="dodgerblue2")+
+  labs(title="Scree Plot Iris Clusters", x="Centers",y= "Total Sum of Squares (ESS)")+
+  scale_x_discrete(limits=c(0: 10))
+
+second_d<- c(NA,NA,diff(diff(scree$tot.withinss)))
+
+set_center<- which(max(second_d, na.rm = T)==second_d)
+
+echo_km<- kmeans(echogen[,], centers = set_center ,nstart = 10)
+
+dbscan::hullplot(echogen[,], echo_km, main = "Clusters by Principal Components")
+```
+
+Looking at the scree plot we see that there are some major impovements with the first steps however the marginal improvement decreases rapidly. By maximizing the second derivative I find 3 to be the optimal number of clusters. When I plot these clusters by principal components you can see distinct boundaries by group.
+
+## Question #4 Coding Question: You are trying to cluster the *iris* data set via kmean. Unfortunately, the kmean function is not installed in your R package and you have to write the code from the scratch. Write a function call kmean.alt function that calculates the within cluster variance, aggregates the data by the cluster number, and plots "total within cluster vs. number of cluster". Verify that your code successfully indicates that the cluster number 3 is the appropriate one.
+
+```{r , message=FALSE, warning=FALSE}
+
+kmean.alt<- function(data, k=NULL) {
+  require(dplyr)
+  require(ggplot2)
+  require(stats)
+  #centers is a list or a single value if centers blank the function will test log(n) s.t. n = nrow(data) centers and return the optimum number of centers
+  if (length(k) == 0){
+    start<- 1
+    stop<- round(log(nrow(data),2))
+  } else{
+    start<- k
+    stop<- k
+  }
+  
+  #declare return variable with cluster variance
+  total_within<- vector(mode = "numeric", length = stop)
+  
+  num_col<-c()
+  for(i in 1:ncol(data)){
+  num_col[i]<- is.numeric(data[,i])
+  }
+#run principal component(PC) analysis 
+  data_pca<-prcomp(data[,num_col])
+  
+  v<-summary(data_pca) #store summary values
+i=0 # create step variable that will identify number of PC's
+sum_var<-0 #create stoping variable 
+while(sum_var<.95){
+  i=i+1
+  sum_var<-sum(v$importance[2,1:i])
+}
+
+#keep minimal PC's
+  data_pca <-data_pca$x[,1:i]
+  remove(i)
+  
+  
+  #iterate over different numbers of clusters
+  for(j in start:stop){
+  
+# assign number of clusters
+  centers<- j
+  #find numeric columns
+
+  #create starting points for centers
+  center_x<- vector(mode = "numeric",length = centers)
+  center_y<- vector(mode = "numeric",length = centers)
+  for( i in 1:centers){
+  center_x[i]<- sample(data_pca[,1],size = 1)
+  center_y[i]<- sample(data_pca[,2],size = 1)
+  }
+  
+  #declare cluster vectors
+  cluster<-vector(mode = "integer",length = nrow(data_pca))
+  cluster_old<-vector(mode = "integer",length = nrow(data_pca))
+  
+  #if j=1 assign all clusters to 1
+  if(j!=1){ 
+  #calculate first iteration of assignments
+  for(i in 1:nrow(data_pca)){
+    point_df<- rbind(data_pca[i,], data.frame(center_x,center_y))
+    point_dist<- as.matrix(dist(point_df))
+    cluster[i] <- which(min(point_dist[-1,1])==point_dist[,1])-1
+  }
+  }else{
+      cluster<- rep(1, nrow(data))
+      cluster_old<- cluster
+    }
+  
+  #check for exit condition that clusters stop changing
+  while (sum(cluster_old==cluster)!=length(cluster)){
+    #calculate centers for another iteration
+      for( i in 1:centers){
+        center_x[i]<- mean(data_pca[which(cluster==i),1],na.rm = T)
+        center_y[i]<-  mean(data_pca[which(cluster==i),2], na.rm = T)
+      }
+    cluster_old<-cluster
+    #calculate cluster assignments
+      for(i in 1:nrow(data_pca)){
+        point_df<- rbind(data_pca[i,], data.frame(center_x,center_y))
+        point_dist<- as.matrix(dist(point_df))
+        cluster[i] <- which(min(point_dist[-1,1],na.rm = T)==point_dist[,1])-1
+      }
+  }
+  
+  #assign clusters to dataset
+  data$cluster<- cluster
+  
+  #calculate within cluster variance
+  within_clust<- data%>%
+  group_by(cluster)%>%
+  dplyr::select(which(num_col))%>%
+  summarise_all(.funs = c(var))
+  
+  #sum variance for final output
+  if(start!=stop){
+  total_within[j] <- within_clust[,2:5]%>%sum()
+  }else{
+    total_within <- within_clust[,2:5]%>%sum()
+  }
+  
+  }
+  
+  #create df for scree plot
+  scree<- data.frame("centers"=start:stop, "total_within" = total_within)
+  
+  #create scree plot
+  plot<- ggplot(scree, aes(x=centers, y=total_within))+
+    theme_bw()+
+    theme(panel.border = element_blank(),
+        axis.line = element_line(color = 'black'),
+        plot.background = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        plot.title = element_text(hjust = 0.5),
+        axis.title.x = element_text(color="black", size=10),
+        axis.title.y = element_text(color="black", size=10)
+        )+
+  geom_line(col="lightblue")+
+  geom_point(col="dodgerblue2")+
+  labs(title="Scree Plot Iris Clusters", x="Centers",y= "Total Sum of Squares (ESS)")+
+  scale_x_discrete(limits=c(0: 10))
+  
+  #dake second derivative of total within cluster variance
+  second_d<- c(NA,NA,diff(diff(scree$total_within)))
+
+  #find optimal number of clusters by maximizing the second_d
+  set_center<- which(max(second_d, na.rm = T)==second_d)
+  
+  #return plot, optimal number of clusters and cluster assignments
+  return(list(plot,set_center, cluster))
+  
+  # ggplot(iris, aes(x=Sepal.Length, y = Petal.Length, color= as.factor(cluster)))+
+  # mytheme+
+  # geom_point()
+  # 
+
+}
+```
+
+```{r}
+#run function without cluster assignment
+test<-kmean.alt(iris)
+test[[1]]
+test[[2]]
+```
+
+The function works and outputs the right values. The scree plot looks good and the optimal value is 3 clusters as expected. Now I want to test this and rerun the function, assuming kmeans still isn't loaded, and return the optimal cluster assignments.
+
+```{r}
+#rerun function with optimal number of clusters and visualize on actual data
+test2<-kmean.alt(iris,k=test[[2]])
+ggplot(iris, aes(x=Sepal.Length, y = Petal.Length, color= as.factor(test2[[3]])))+
+  mytheme+
+  geom_point()+
+  scale_fill_manual(values=c("#CC6666", "#9999CC", "#66CC99"))+
+  labs(title ="Length by Cluster", x ="Sepal", y="Petal")+
+  guides(colour = guide_legend(title = "Cluster",
+                               override.aes = list(size = 4)))
+
+```
+
+Beautiful! The function works and the clustering is doing what I expected it to do.
