@@ -1,0 +1,469 @@
+---
+title: "Homework 4 Solutions"
+author: "Elijah Hall, EH2794"
+date: "`r Sys.Date()`"
+output:
+  prettydoc::html_pretty:
+  theme: cayman
+highlight: github
+---
+```{r setup, include=FALSE}
+library(knitr)
+opts_chunk$set(echo = TRUE, comment="", warning = FALSE, message = FALSE, tidy.opts=list(width.cutoff=55), tidy = TRUE)
+```
+
+```{r libraries}
+require(tidyverse)
+require(data.table)
+require(tree)
+require(ISLR)
+require(MASS)
+require(caret)
+require(randomForest)
+require(gbm)
+
+```
+
+```{r source_files}
+
+```
+
+```{r functions}
+#plot functino for cross validation on tree digrams
+plot_tree<- function(x,var1,var2){
+  temp<- data.frame(var2=x[var2], var1=x[var1])
+  
+ggplot(temp, aes(x=temp[,var1], y=temp[,var2]))+ 
+         mytheme+
+  geom_line(col="blue")+
+         geom_point(col="blue")+
+  labs(title="Inspecting Cross-Validation Results", x=names(temp)[1], y= names(temp)[2])
+}
+
+#find random forrest accuracy for classification
+rf.accuracy<- function(x){
+  if(class(x)[1]=="randomForest.formula"){
+    TP=x$confusion[1,1]
+    TN=x$confusion[2,2]
+    total<-(sum(as.matrix(x$confusion[1:2,1:2])))
+    (TP+TN)/total } else{ 
+      temp<-as.matrix(x)
+      TP=temp[1,1]
+      TN=temp[2,2]
+      total<-sum(temp)
+      (TP+TN)/total
+    }
+  }
+
+```
+
+```{r constants}
+theme_update(plot.title = element_text(hjust = 0.5))
+
+mytheme <- theme_bw()+
+  theme(panel.border = element_blank(),
+        axis.line = element_line(color = 'black'),
+        plot.background = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        plot.title = element_text(hjust = 0.5),
+        axis.title.x = element_text(color="black", size=10),
+        axis.title.y = element_text(color="black", size=10)
+        )
+```
+
+```{r load_data}
+data("Carseats")
+data("Boston") 
+data("OJ")
+```
+
+```{r clean_data}
+
+
+```
+## Question #1 Classification Trees
+
+## Install **tree** package and load the **ISLR** library to use *Carseats* dataset. It is a simulated data set containing sales of child car seats at 400 different stores. In this problem, we are going to investigate the variable Sales and find the mean and standard deviation of Sales.  
+
+### a. Create a binary categorical variable “High” based on the continuous Sales variable that is higher than 8 and add it to the original data frame. Type "yes" if sales are above 8, otherwise type "no".
+
+```{r 1a , message=FALSE, warning=FALSE}
+head(Carseats)
+# mean(Carseats$Sales)
+# sd(Carseats$Sales)
+
+Carseats<-Carseats%>%mutate(High=factor(ifelse(Carseats$Sales>8,"yes","no")))
+
+```
+
+### b. Using an already built function called *tree*, construct the decision tree predicting **High** from all other variables in the dataset defining splits based upon the Gini coefficient. How many terminal nodes are there in your initial tree? 
+
+```{r 1b , message=FALSE, warning=FALSE}
+set.seed(0)
+D.tree.1<- tree(formula = High~.,data = Carseats[,-1],method="gini")
+summary(D.tree.1)$misclass[1]
+
+```
+
+There are `r summary(D.tree.1)$size` terminal nodes and the overall tree has a missclassification rate of `r summary(D.tree.1)$misclass[1]/summary(D.tree.1)$misclass[2]`.
+
+```{r eval=FALSE, echo=FALSE}
+ plot(D.tree.1)
+ text(D.tree.1,pretty=1)
+```
+
+c.	Split the data into a training and test set with an 70%-30% split, respectively. Use `set.seed(0)` so your results will be reproducible. 
+
+```{r 1c , message=FALSE, warning=FALSE}
+set.seed(0)
+train<- sample(x = 1:nrow(Carseats),size = round(.7*nrow(Carseats)))
+
+```
+
+d.	Fit and predict the High variable for observations that are within your test set using the *tree* function on training and test sets you made in step c. Report the accuracy of the prediction using the confusion Matrix.  
+
+```{r 1d , message=FALSE, warning=FALSE}
+set.seed(0)
+D.tree.2<- tree(formula = High~., data= Carseats[train,-1], method = "gini")
+
+D.tree.2.pred<- predict(object=D.tree.2,newdata = Carseats[-train,] )[,2]
+D.tree.2.pred[D.tree.2.pred>=.5]<-"yes"
+D.tree.2.pred[D.tree.2.pred<.5]<-"no"
+
+D.tree.2.cmat<- confusionMatrix(factor(D.tree.2.pred), 
+                factor(Carseats$High[-train]), 
+                positive = "yes",
+                dnn = c("Prediction", "Reference"))
+D.tree.2.cmat
+
+```
+
+The accuracy of this model is `r D.tree.2.cmat$overall[1]`. The model is better than a random guess, however it doesn't seem to be very good as is.
+
+e.	Implement cross-validation using *cv.tree* and, thus, cost-complexity pruning to determine how far back to *prune your tree* (`FUN=prune.misclass`). Use `set.seed(0)`. 
+
+```{r 1e , message=FALSE, warning=FALSE}
+set.seed(0)
+D.tree.2.cv<- cv.tree(object =D.tree.2, FUN = prune.misclass )
+D.tree.2.cv
+```
+
+f.	When you inspect the *cv.tree*, the size indicates the number of terminal nodes, the deviance is the criterion we specify (the misclassification rate in this case), and *k* is analogous to the cost complexity tuning parameter alpha. Method indicates the specified criterion. Visualize the results from f across various numbers of terminal nodes/values for alpha. 
+
+```{r 1f , message=FALSE, warning=FALSE}
+plot_tree(D.tree.2.cv,"k","size")
+```
+
+As the number of nodes increase the cost of complexity approaches -Infinity. 
+
+g.	Explain the appropriate number of terminal nodes to prune the tree. Prune your tree using *prune.misclass*. 
+
+```{r 1g , message=FALSE, warning=FALSE}
+#calculate best number of nodes to prune at that minimizes dev
+best <- round(mean(D.tree.2.cv$size[which(D.tree.2.cv$dev == min(D.tree.2.cv$dev))]))
+
+#prune tree
+D.tree.2.prune<-prune.misclass(D.tree.2,best = best)
+```
+
+The best number of nodes to prune at is `r best`, since it minimizes the deviance or missclassification rate.
+
+h.	Predict the **High** Sales variable for observations that are within your test set using this pruned tree. Report the accuracy of your predictions using the confusion Matrix.
+
+```{r 1h , message=FALSE, warning=FALSE}
+D.tree.2.prune.pred<- predict(D.tree.2.prune, newdata =Carseats[-train,-1] )[,2]
+D.tree.2.prune.pred[D.tree.2.prune.pred >=.5]<-"yes"
+D.tree.2.prune.pred[D.tree.2.prune.pred <.5]<-"no"
+D.tree.2.prune.cmat<- confusionMatrix(factor(D.tree.2.prune.pred), 
+                factor(Carseats$High[-train]), 
+                positive = "yes",
+                dnn = c("Prediction", "Reference"))
+D.tree.2.prune.cmat
+```
+
+The accuracy of this model is `r round(D.tree.2.prune.cmat$overall[1],3)`. The model performs worse than the previous.
+
+## Question #2 Regression Trees
+
+Load the library **MASS** and *Boston* dataset that contains the inspection of housing values in the suburbans of Boston. Inspect the dataset before doing follwing steps. 
+
+```{r 2 , message=FALSE, warning=FALSE}
+glimpse(Boston)
+summary(Boston)
+```
+### Variable Descriptions 
+
+* **CRIM** - per capita crime rate by town
+* **ZN** - proportion of residential land zoned for lots over 25,000 sq.ft.
+* **INDUS** - proportion of non-retail business acres per town.
+* **CHAS** - Charles River dummy variable (1 if tract bounds river; 0 otherwise)
+* **NOX** - nitric oxides concentration (parts per 10 million)
+* **RM** - average number of rooms per dwelling
+* **AGE** - proportion of owner-occupied units built prior to 1940
+* **DIS** - weighted distances to five Boston employment centres
+* **RAD** - index of accessibility to radial highways
+* **TAX** - full-value property-tax rate per $10,000
+* **PTRATIO** - pupil-teacher ratio by town
+* **B** - 1000(Bk - 0.63)^2 where Bk is the proportion of blacks by town
+* **LSTAT** - % lower status of the population
+* **MEDV** - Median value of owner-occupied homes in $1000's
+
+* Note Variable **MEDV** seems to be censored at 50.00 (corresponding to a median price of 50,000)  Censoring is suggested by the fact that the highest median price of exactly 50,000 is reported in 16 cases, while 15 cases have prices between 40,000 and 50,000, with prices rounded to the nearest hundred. Harrison and Rubinfeld do not mention any censoring.
+
+a.	Split the data by 70%-30%.
+
+```{r 2.a , message=FALSE, warning=FALSE}
+train<- sample(x = 1:nrow(Boston),size = round(.7*nrow(Boston)))
+```
+
+b.	Train the tree to predict the median value of owner-occupied homes (in $1 K). 
+
+```{r 2.b , message=FALSE, warning=FALSE}
+D.tree.boston=tree(medv~.,Boston,subset=train)
+summary(D.tree.boston)
+
+```
+
+c.	Perform the cross-validation and determine the prune number of tree. **Note:** Use the default function to do the pruning. 
+
+```{r 2.c , message=FALSE, warning=FALSE}
+cv.D.tree.boston <- cv.tree(D.tree.boston )
+
+plot_tree(cv.D.tree.boston,"k","size")
+
+best <- cv.D.tree.boston$size[which(cv.D.tree.boston$dev == min(cv.D.tree.boston$dev))]
+
+prune.boston<- prune.tree(D.tree.boston,best=8)
+summary(prune.boston)
+```
+
+
+The default for the pruned tree is returning the full tree. Therefore I chose best= 8 to evaluate a difference on the following questions.
+
+d.	Calculate and assess the MSE value of owner-occupied homes (in \$1 K) of the test data on the overall tree. 
+
+```{r 2.d , message=FALSE, warning=FALSE}
+boston_pred <- predict(D.tree.boston,newdata=Boston[-train,])
+boston.test=Boston[-train,"medv"]
+
+#calculate MSE
+full.MSE<- mean((boston_pred-boston.test)^2)
+```
+
+```{r}
+#compare vlaues
+ggplot(data.frame(boston_pred,boston.test), aes(x=boston_pred,y=boston.test))+
+  mytheme+
+  geom_point()+
+  geom_smooth(method = "lm", se=F)+
+  labs(title= "Actual v. Predicted from Full Tree on Boston", x= "Predicted", y="Actual")
+
+#plot residuals
+resid_df<-data.frame(index=1:length(boston_pred), residuals= (boston_pred-boston.test))
+ggplot(resid_df, aes(x=index, y=residuals))+mytheme+geom_point(col="red")+geom_smooth(method = "lm", se=F)+geom_hline(yintercept = quantile(resid_df$residuals, .975, na.rm = T),lty=2,col="coral")+geom_hline(yintercept = quantile(resid_df$residuals, .025, na.rm = T),lty=2,col="coral")+labs(title="Residuals of Full Tree on Boston")
+```
+
+e.	Calculate the MSE of the test data on the pruned tree.
+
+```{r 2.e , message=FALSE, warning=FALSE}
+pruned_boston_pred <- predict(prune.boston,newdata=Boston[-train,])
+
+#compare vlaues
+ggplot(data.frame(pruned_boston_pred,boston.test), aes(x=pruned_boston_pred,y=boston.test))+
+  mytheme+
+  geom_point()+
+  geom_smooth(method = "lm", se=F)+
+  labs(title= "Actual v. Predicted from Pruned Tree on Boston", x= "Predicted", y="Actual")
+
+#plot residuals
+resid_df<-data.frame(index=1:length(pruned_boston_pred), residuals= (pruned_boston_pred-boston.test))
+ggplot(resid_df, aes(x=index, y=residuals))+mytheme+geom_point(col="red")+geom_smooth(method = "lm", se=F)+geom_hline(yintercept = quantile(resid_df$residuals, .975, na.rm = T),lty=2,col="coral")+geom_hline(yintercept = quantile(resid_df$residuals, .025, na.rm = T),lty=2,col="coral")+labs(title="Residuals of Pruned Tree on Boston")
+
+#calculate MSE
+pruned.MSE<- mean((pruned_boston_pred-boston.test)^2)
+```
+
+f.	Which method leads to better results, and by how much do the results improve?
+
+The full tree is better than the pruned tree. The MSE of the pruned tree is `r pruned.MSE` while the MSE of the full tree is `r full.MSE`.  The results of the pruned are worse by a about `rround((pruned.MSE-full.MSE)/pruned.MSE,digits = 3)*100`% when comparing MSE.
+
+```{r 2.f , message=FALSE, warning=FALSE, eval=FALSE, echo=FALSE}
+round((pruned.MSE-full.MSE)/pruned.MSE,digits = 3)*100
+```
+
+
+## Question #3 Bagging & Random Forests
+
+Load the *OJ* dataset from the **ISLR** library into your workspace. The data contains 1,070 purchases where custromer either purchase Citrus Hill or Minute Maid orange juice. A number of characteristics of the customer and product are recorded. Install the package called **randomForest**. 
+
+### Variable Descriptions 
+
+**Purchase** - A factor with levels CH and MM indicating whether the customer purchased Citrus Hill or Minute Maid Orange Juice
+**WeekofPurchase** - Week of purchase
+**StoreID** - Store ID
+**PriceCH** - Price charged for CH
+**PriceMM** - Price charged for MM
+**DiscCH** - Discount offered for CH
+**DiscMM** - Discount offered for MM
+**SpecialCH** - Indicator of special on CH
+**SpecialMM** - Indicator of special on MM
+**LoyalCH** - Customer brand loyalty for CH
+**SalePriceMM** - Sale price for MM
+**SalePriceCH** - Sale price for CH
+**PriceDiff** - Sale price of MM less sale price of CH
+**Store7** - A factor with levels No and Yes indicating whether the sale is at Store 7
+**PctDiscMM** - Percentage discount for MM
+**PctDiscCH** - Percentage discount for CH
+**ListPriceDiff** - List price of MM less list price of CH
+**STORE** - Which of 5 possible stores the sale occured at
+
+
+### 1.	Split the data into a training and test set with an 80%-20% split, respectively. 
+
+```{r 3.1 , message=FALSE, warning=FALSE}
+set.seed(0)
+train<- sample(x = 1:nrow(OJ),size = round(.8*nrow(OJ)))
+```
+
+### 2.	Construct an initial random forest predicting the correct brand purchase from all other variables in the training dataset using the default setting; this will create 500 trees. (use `set.seed(0)`).
+
+```{r 3.2 , message=FALSE, warning=FALSE}
+set.seed(0)
+rf.mod1<- randomForest(Purchase~.,data=OJ, mtry=17,subset=train)
+sum_rf.mod1<- summary(rf.mod1)
+```
+
+### 3.	What is the accuracy of this initial random forest on the training set? What about on the test set?
+
+```{r 3.3 , message=FALSE, warning=FALSE}
+
+train.acc<- rf.accuracy(rf.mod1)
+
+test.acc<- rf.accuracy(randomForest(Purchase~.,data=OJ, mtry=17,subset=-train))
+```
+
+The accuracy of the initial model is `r round(train.acc,digits=3)` on the training set and `r round(test.acc,digits=3)` on the test set.
+
+### 4.	Which variable is aiding the most in classifying the orange juice purchases? Use function `importance()`. 
+
+```{r 3.4 , message=FALSE, warning=FALSE}
+imp_df<- importance(rf.mod1)%>%as.data.frame()
+imp_df<-data.frame(importance=imp_df[,1],Name=row.names(imp_df))
+imp_df<-imp_df%>%arrange(importance)
+imp_df$Name<-factor(imp_df$Name, levels = imp_df$Name)
+ggplot(imp_df, aes(y=importance, x=Name,fill=log(importance)) )+
+  mytheme+
+  geom_bar(stat="identity")+
+  theme(legend.position="none")+
+  coord_flip()+
+  labs(title="Variable Importnace of Initial RF Model on OJ", x="", y="Importance Value")
+
+```
+
+**`rimp_df$Name[imp_df$importance == max(imp_df$importance)]`** is the most important variable.
+
+### 5.	Vary the number of variables considered as candidates at each node split in the random forest procedure (from one to all predictors).Record the out-of-bag error rates for each of these random forests on the training set. (Use `set.seed(0)` so your results will be reproducible.) (Hint: You will want to record the error rate). You can follow the following algorithm for this problem. 
+
+```{r 3.5 , message=FALSE, warning=FALSE}
+set.seed(0)
+rf.mod1<- randomForest(Purchase~.,data=OJ, mtry=17,subset=train)
+sum_rf.mod1<- summary(rf.mod1)
+
+n_var<- seq(17)
+
+rf.mod.oob.er<-c()
+for(i in n_var){
+set.seed(0)
+temp.rf.mod<- randomForest(Purchase~.,data=OJ, mtry=i,subset=train)
+rf.mod.oob.er[i]<- tail(temp.rf.mod$err.rate,1)[1,1]
+}
+
+ggplot(data.frame(n_var=n_var,error=rf.mod.oob.er), aes(x=n_var, y=error))+
+  mytheme+
+  geom_line(col="blue")+
+  labs(title="RF Out of Bag Error v. # of Variables to try on each node", x="Number of Variables", y= "Error Rate")
+
+n_var[rf.mod.oob.er==min(rf.mod.oob.er)]
+```
+
+
+
+### 6.	What is the maximum (optimal) accuracy among your random forests on the training set? How many variables were considered at each split in this best random forest? 
+
+The best erorr rate was `r min(rf.mod.oob.er)`, however it occured when the number of variables selected at each node was either 10 or 13.
+
+##Question #4 Boosting
+
+Continue using the OJ dataset and the training/test sets you already loaded into your workspace. Install a package **gbm**.
+
+1.	In order to boost with classification trees, we need to do a bit of data munging to transform the response variable. You may use the following lines of code to produce the copies of your dataset OJ.train.indicator and OJ.test.indicator that have a transformed response variable. (You must replace OJ.trainand OJ.test with whatever names you used in your own code.) 
+
+```{r 4.1 , message=FALSE, warning=FALSE}
+#transform the response variable
+OJ.train.indicator = OJ[train,]
+OJ.test.indicator = OJ[-train,] 
+OJ.train.indicator$Purchase = as.vector(OJ$Purchase[train], mode = "numeric") - 1 
+OJ.test.indicator$Purchase = as.vector(OJ$Purchase[-train], mode = "numeric") - 1 
+
+```
+
+2. Construct an initial boosted model on the training set that uses all of the following settings at once: Use set.seed(0). 
+
+    a.	The Bernoulli distribution. 
+    b.	10,000 trees. 
+    c.	An interaction depth of 4.
+    d.	A shrinkage parameter of 0.001.
+    
+```{r 4.2 , message=FALSE, warning=FALSE}
+set.seed(0)
+boost.oj<- gbm(Purchase~.,data=OJ.train.indicator,distribution="bernoulli",n.trees=10000,interaction.depth=4,shrinkage = 0.001)
+summary(boost.oj)
+```
+
+
+3.	Predict your test set observations using the initial boosted model across up to 10,000 trees, considering groups of 100 trees at a time. (Hint: Use `type = "response"`) and round your ultimate predictions.) 
+
+```{r 4.3 , message=FALSE, warning=FALSE}
+predmat<- matrix(NA, nrow = 214, ncol = 100)
+set.seed(0)
+for(i in 1:100){
+predmat[,i]<-round(predict(boost.oj, newdata = OJ.test.indicator,n.trees = i*100,type =  "response"))
+}
+
+```
+
+4.	Calculate and store the accuracy for each of the 100 models considered in part 3. What is the minimum number of trees required to reach the maximum accuracy? 
+
+```{r 4.4 , message=FALSE, warning=FALSE}
+n_tree= seq(1:100)*100
+acc_ntree<-c()
+for(i in 1:ncol(predmat)){
+acc_ntree[i]<- rf.accuracy( table(factor(OJ.test.indicator$Purchase, levels = c(0,1)), 
+                factor(predmat[,i], levels = c(0,1))))
+}
+
+#minimum number of trees needed to reach maximum accuracy
+n_tree_min<- min(n_tree[acc_ntree== max(acc_ntree)])
+```
+
+The minimum number of trees needed to reach the maximum accuracy of this model is `r n_tree_min` trees. It shoul dbe noted as you will see below that the added benifit is marginal to the added complexity needed to reach this level of accuracy. If complexity costs are high then consideration should be made to use less trees.
+
+5.	Plot the accuracies found in part 4 against the number of trees. Add to the plot: 
+
+ 
+```{r message=FALSE, warning=FALSE}
+
+ggplot(data.frame(n_tree= n_tree,accuracy=acc_ntree), aes(x=n_tree, y=accuracy)) +
+  mytheme+
+  geom_line(col="blue")+
+  geom_hline(yintercept = max(acc_ntree), lty=2, col="coral")+
+  annotate(geom ="text" ,x=1000, y=max(acc_ntree), label = paste("Boosted RF"), vjust=1)+
+  geom_hline(yintercept = test.acc, lty=2, col="purple")+
+  annotate(geom ="text" ,x=1000, y=test.acc, label = paste("RF"), vjust=1)+
+  geom_hline(yintercept = D.tree.2.prune.cmat$overall[1], lty=2, col="green")+
+  annotate(geom ="text" ,x=1000, y=D.tree.2.prune.cmat$overall[1], label = paste("Pruned DT"), vjust=1)+
+  labs(title="Accuracy of Boosted RF Model as # Trees Increases" ,x="Number of Trees", y="Accuracy")
+
+```
+

@@ -1,0 +1,625 @@
+---
+title: "APANPS5335 Final Project, Summer 2018"
+author: ""
+date: "2018-08-10"
+output:
+  prettydoc::html_pretty:
+  theme: cayman
+highlight: github
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+opts_chunk$set(echo = TRUE, comment="", warning = FALSE, message = FALSE, tidy.opts=list(width.cutoff=55))
+```
+
+```{r libraries}
+library(DT)
+library(data.table)
+library(tidyverse)
+library(class)
+library(ISLR)
+library(caret)
+library(glmnet)
+library(plyr)
+library(randomForest)
+library(gbm)
+library(nnet)
+library(doParallel)
+library(devtools)
+source_url('https://gist.githubusercontent.com/fawda123/7471137/raw/466c1474d0a505ff044412703516c34f1a4684a5/nnet_plot_update.r')
+
+```
+
+```{r source_files}
+
+```
+
+```{r functions}
+
+```
+
+```{r constants}
+
+```
+
+```{r load_data}
+MINST_Train<-read_csv("MNIST-fashion training set-49.csv")
+bckup_MINST_Train<-MINST_Train
+MINST_Test<-read_csv("MNIST-fashion testing set-49.csv")
+bckup_MINST_Test<-MINST_Test
+
+LeaderBoard<-readRDS("LeaderBoard.rdata")
+```
+
+```{r clean_data}
+#I know the color scale is already a form of normalization howver I will scale the values so that the mean is at 0.
+MINST_Train[,names(MINST_Train)!="label"]<-MINST_Train[,names(MINST_Train)!="label"]%>%scale()
+MINST_Train$label[ MINST_Train$label== "Ankle boot"]<- "Ankle.boot"
+MINST_Test[,names(MINST_Test)!="label"]<-MINST_Test[,names(MINST_Test)!="label"]%>%scale()
+MINST_Test$label[ MINST_Test$label== "Ankle boot"]<- "Ankle.boot"
+#set label to factor
+MINST_Train$label<- factor(MINST_Train$label)
+MINST_Test$label<- factor(MINST_Test$label)
+```
+
+
+```{r The Leader Board, echo=FALSE, eval=FALSE}
+LeaderBoard <- data.frame(Model = "", `Sample Size` = c(rep(1000, 10), rep(3000, 10), rep(10000, 10)), `A: Sample Size Proportion` = 0, `B: Accuracy` = 0, Points = 0)
+```
+
+## Introduction
+
+The Data is the MNIST Fashion database, [here](https://github.com/zalandoresearch/fashion-mnist), which collected many images for different types of apparel.  Each image is divided into small squares called **pixels** of equal area.  Within each pixel, a grayscale brightness measurement was recorded.  The brightness values range from 0 (white) to 255 (black).  The original data set divided each image into 784 (28 by 28) pixels.  To facilitate easier computation, the data is condensed into 49 pixels (7 by 7) per image.  The first 7 pixels represent the top row, the next 7 pixels form the second row, etc. There are two data sets a training and test set. The training set has 60,000 images and the test set has 10,000. Both data sets contain a label column and 49-pixel columns containing the brightness values. There are 10 labels that I will try to train various models on. Each model will be scored and compete for the number one rank. The **points** will be scored to optimize on complexity and performance. The goal will be to have the smallest sample size needed to train the model and the best accuracy. 
+
+**Points = 0.5 * A + (1 - B)**
+
+where
+
+**A** is the proportion of the training rows that is utilized in the model.  For instance, if you use 30,000 of the 60,000 rows, then A = 30,000 / 60,000 = 0.5; and
+
+**B** is the testing accuracy.  This is the proportion of the predictions on the testing set that are correctly classified.  For instance, if 9,000 of the 10,000 rows are correctly classified, then B = 9,000 / 10,000 = 0.9.
+The lowest score wins!
+
+## Process and Approach
+
+I will use the following methods: K-Nearest Neighbor (KNN), Generalized Linear Model (GLM) with elastic net, Random Forrest (RF), Generalized Boosted Regression Models (GBM), and Neural Networks (NN) to generate 10 different models. Each model will be selected with specific parameters set to compete, little to no hyperparameter tuning will be used. Three separate iterations will be run and the accuracy averaged for each model. Additionally, three separate sample sizes will be used. Each model will run 3 iterations on each sample size. This means with 10 models, 3 sample sizes and 3 runs each there will be a total of 90, (10 x 3 x 3), model runs. Each run will follow the process below 
+
+  1)	Select Model: Create ID and fill leaderboard
+  2)	Sample: Draw random sample and fill leaderboard with sample size and proportion of total sample (A) as mentioned above.
+  3)	Fit: set parameters and train model
+  4)	Predict: predict values on test set and store prediction values in master predict data sets
+  5)	Evaluate: calculate accuracy (B) of model and store in leaderboard
+  6)	Score: Calculate points and store in leaderboard
+
+
+### Sample Sizes
+
+I will choose three sample sizes that will reflect the purpose and goal of this competition between models. The first goal is to minimize complexity. That means smaller sample sizes and limited parameter searching. However, I need to ensure that the sample is not too small. There are 10 labels and I want to make sure I have at least 30 of each label. Assuming they are evenly distributed that would mean a random sample no smaller than 300. I also want to be concerned about points as the model is scored using the points equation above which penalizes larger samples. For these reasons I choose sample sizes of 1000, 3000, and 10000. 
+
+## Models
+
+### Model 1: K-Nearest Neighbor (KNN)
+
+The first model will be a K-Nearest Neighbor (KNN). This model compares a specific observation to the set number, k, of nearest or similar observations. The proportion of classes out of the k observations is then the relative likelihood that this specific observation belongs to any one class. 
+
+I will sample, ensuring to set seed and change with every iteration. The value of k set to 5 and no other parameters. I chose 5 to make sure that the model won’t be too sensitive to noise but could be stable with smaller samples. I then use the *confusionMatrix()* function from the *caret* package to review performance and extract the accuracy of each run. The accuracy is stored, and the model runs an additional 2 times before averaging and posting the score on the leaderboard. The entire process runs for each sample size updating the leaderboard each time. 
+
+
+```{r code_model1, message=FALSE, warning=FALSE}
+#declare sample sizes
+num_samps_mod_1<- c(1000,3000,10000)
+
+for(j in 1:3){
+  LeaderBoard$Model[j]<- "Model 1 KNN"
+  LeaderBoard$Sample.Size[j]<- num_samps_mod_1[j]
+  LeaderBoard$A..Sample.Size.Proportion[j]<-num_samps_mod_1[j]/60000
+  
+  training_idx_mod_1<- list()
+  Accuracy_mod1_runs<- c()
+  for (i in 1:3){
+    #set seed
+    set.seed(1234*i)
+    #pull sample index
+    training_idx_mod_1<- sample(x = 1:nrow(MINST_Train), size =num_samps_mod_1[j],replace = F)
+    #fit KNN model
+    knn.5 <-  knn(train = MINST_Train[training_idx_mod_1,-1]%>%as.matrix(),
+                  test = MINST_Test[,-1]%>%as.matrix(),
+                  cl = MINST_Train[training_idx_mod_1,1]%>%as.matrix(),
+                  k=5)
+    #compare results
+    performance <- confusionMatrix(data = knn.5%>%as.factor() , 
+                                   reference =  MINST_Test$label%>%as.factor())
+    #pull accuracy
+    Accuracy_mod1_runs[i]<- performance$overall[1]
+
+  }
+  #compute average accuracy across runs
+  LeaderBoard$B..Accuracy[j]<- Accuracy_mod1_runs%>%mean()
+  LeaderBoard$Points[j]<- 0.5 * LeaderBoard$A..Sample.Size.Proportion[j] + (1 - LeaderBoard$B..Accuracy[j])
+}
+
+```
+
+### Model 2: K-Nearest Neighbor (KNN)
+
+The second model will be another KNN. Again, I will sample, ensuring to set seed and change with every iteration. The value of k set to 10 this time with no other parameters. I chose 10 just in case the previous model was too sensitive to noise and performed poorly. I then review performance and extract the accuracy of each run. The accuracy is stored, and the model runs an additional 2 times before averaging and posting the score on the leaderboard. The entire process runs for each sample size updating the leaderboard each time. 
+
+
+
+```{r code_model2, message=FALSE, warning=FALSE}
+
+for(j in 1:3){
+  LeaderBoard$Model[j+3]<- "Model 2 KNN"
+  LeaderBoard$Sample.Size[j+3]<- num_samps_mod_1[j]
+  LeaderBoard$A..Sample.Size.Proportion[j+3]<-num_samps_mod_1[j]/60000
+  
+  training_idx_mod_1<- list()
+  Accuracy_mod1_runs<- c()
+  for (i in 1:3){
+    #set seed
+    set.seed(2345*i)
+    #pull sample index
+    training_idx_mod_1<- sample(x = 1:nrow(MINST_Train), size =num_samps_mod_1[j],replace = F)
+    #fit KNN model
+    knn.10 <-  knn(train = MINST_Train[training_idx_mod_1,-1]%>%as.matrix(),
+                  test = MINST_Test[,-1]%>%as.matrix(),
+                  cl = MINST_Train[training_idx_mod_1,1]%>%as.matrix(),
+                  k=10)
+    #compare results
+    performance <- confusionMatrix(data = knn.5%>%as.factor() , 
+                                   reference =  MINST_Test$label%>%as.factor())
+    #pull accuracy
+    Accuracy_mod1_runs[i]<- performance$overall[1]
+
+
+  }
+  #compute average accuracy across runs
+  LeaderBoard$B..Accuracy[j+3]<- Accuracy_mod1_runs%>%mean()
+  LeaderBoard$Points[j+3]<- 0.5 * LeaderBoard$A..Sample.Size.Proportion[j+3] + (1 - LeaderBoard$B..Accuracy[j+3])
+}
+
+#saveRDS(LeaderBoard, "LeaderBoard.rdata")
+```
+
+
+### Model 3: Generalized Linear Model (GLM) with elastic net
+
+GLM’s are as the name describes, generalized linear models that can allow response variables that error models that have other than normal distributions. You might know that in the general assumptions of linear models, the response variable errors must be homoscedastic around the best fit line. This case generalizes for cases where this is not true. It also generalizes to other statistical regressions such as logistic  and Poisson regression. Additionally, I want to use elastic net regularization, a combination of the two common regularization methods LASSO (aka. L1) and Ridge (aka.L2). In all cases lambda is used a shrinkage value to penalize or shrink less important parameters. In the extreme case such as LASSO or L1 regression the coefficients of the predictors are reduced to zero. The proportion of which method is used is determined by alpha. Ridge only when alpha = 0 and LASSO only when alpha =1.
+
+I will sample, ensuring to set seed and change with every iteration. First I create a model matrix that will generate random transformations of the predictors that will be used to generate various linear modes. I then set various values for lambda. Lambda is the coefficient used to penalize predictors passed on importance. I set alpha to 0.3 so that the model is more Ridge than LASSO in the elastic net. I cross validate to find the best lambda value. I then review performance and extract the accuracy of each run. The accuracy is stored, and the model runs an additional 2 times before averaging and posting the score on the leaderboard. The entire process runs for each sample size updating the leaderboard each time. 
+
+
+```{r code_model3, message=FALSE, warning=FALSE}
+#readRDS("LeaderBoard.rdata")
+for(j in 1:3){
+  #set values on leader board
+  LeaderBoard$Model[j+6]<- "Model 3 GLM"
+  LeaderBoard$Sample.Size[j+6]<- num_samps_mod_1[j]
+  LeaderBoard$A..Sample.Size.Proportion[j+6]<-num_samps_mod_1[j]/60000
+  #declare empty vectors to store calculated values
+  training_idx_mod_1<- list()
+  Accuracy_mod1_runs<- c()
+  for (i in 1:3){
+    
+    #set seed
+    set.seed(3456*i)
+    #pull sample index
+    training_idx_mod_1<- sample(x = 1:nrow(MINST_Train), size =num_samps_mod_1[j],replace = F)
+    
+    #swt up model matrix
+    x <- model.matrix(label~., MINST_Train[training_idx_mod_1,])
+    y <- factor(MINST_Train$label[training_idx_mod_1])
+    
+    #declare range of lambda values to try
+    lambda <- 10^seq(10, -2, length = 100)
+    #set alpha value
+    alpha = .3
+    #fit model
+    set.seed(3456*i)
+    glm.mod <- glmnet(x, y, alpha = alpha, lambda = lambda, family="multinomial")
+    #find the best lambda from our list via cross-validation
+    set.seed(3456*i)
+    cv.out <- cv.glmnet(x, y, alpha = alpha,family="multinomial" )
+    #pull out best lambda value
+    bestlam <- cv.out$lambda.min
+    #make predictions
+    glm.pred <- predict(glm.mod, s = bestlam, newx =MINST_Test%>%data.matrix() ,  type = "class")
+    #compare results
+    performance <- confusionMatrix(data = glm.pred%>%as.factor() , 
+                                   reference =  MINST_Test$label%>%as.factor())
+    #pull accuracy
+    Accuracy_mod1_runs[i]<- performance$overall[1]
+
+  }
+  #compute average accuracy across runs
+  LeaderBoard$B..Accuracy[j+6]<- Accuracy_mod1_runs%>%mean()
+  LeaderBoard$Points[j+6]<- 0.5 * LeaderBoard$A..Sample.Size.Proportion[j+6] + (1 - LeaderBoard$B..Accuracy[j+6])
+}
+
+#saveRDS(LeaderBoard, "LeaderBoard.rdata")
+```
+
+### Model 4: Generalized Linear Model (GLM) with elastic net
+
+I will use another GLM however I will change the value of alpha to 0.7, making the elastic net more LASSO than Ridge. I will sample, ensuring to set seed and change with every iteration. Again, I create a model matrix that will generate random transformations of the predictors that will be used to generate various linear modes. I set various values for lambda, cross validate to find the best lambda value, and then review performance extracting the accuracy of each run. The accuracy is stored, and the model runs an additional 2 times before averaging and posting the score on the leaderboard. The entire process runs for each sample size updating the leaderboard each time. 
+
+
+```{r code_model4, message=FALSE, warning=FALSE}
+#readRDS("LeaderBoard.rdata")
+for(j in 1:3){
+  #set values on leader board
+  LeaderBoard$Model[j+9]<- "Model 4 GLM"
+  LeaderBoard$Sample.Size[j+9]<- num_samps_mod_1[j]
+  LeaderBoard$A..Sample.Size.Proportion[j+9]<-num_samps_mod_1[j]/60000
+  #declare empty vectors to store calculated values
+  training_idx_mod_1<- list()
+  Accuracy_mod1_runs<- c()
+  for (i in 1:3){
+    
+    #set seed
+    set.seed(4567*i)
+    #pull sample index
+    training_idx_mod_1<- sample(x = 1:nrow(MINST_Train), size =num_samps_mod_1[j],replace = F)
+    
+    #swt up model matrix
+    x <- model.matrix(label~., MINST_Train[training_idx_mod_1,])
+    y <- factor(MINST_Train$label[training_idx_mod_1])
+    
+    #declare range of lambda values to try
+    lambda <- 10^seq(10, -2, length = 100)
+    #set alpha value
+    alpha = .7
+    #fit model
+    set.seed(4567*i)
+    glm.mod <- glmnet(x, y, alpha = alpha, lambda = lambda, family="multinomial")
+    #find the best lambda from our list via cross-validation
+    set.seed(4567*i)
+    cv.out <- cv.glmnet(x, y, alpha = alpha,family="multinomial" )
+    #pull out best lambda value
+    bestlam <- cv.out$lambda.min
+    #make predictions
+    glm.pred <- predict(glm.mod, s = bestlam, newx =MINST_Test%>%data.matrix() ,  type = "class")
+    #compare results
+    performance <- confusionMatrix(data = glm.pred%>%as.factor() , 
+                                   reference =  MINST_Test$label%>%as.factor())
+    #pull accuracy
+    Accuracy_mod1_runs[i]<- performance$overall[1]
+
+  }
+  #compute average accuracy across runs
+  LeaderBoard$B..Accuracy[j+9]<- Accuracy_mod1_runs%>%mean()
+  LeaderBoard$Points[j+9]<- 0.5 * LeaderBoard$A..Sample.Size.Proportion[j+9] + (1 - LeaderBoard$B..Accuracy[j+9])
+}
+
+#saveRDS(LeaderBoard, "LeaderBoard.rdata")
+```
+
+
+### Model 5: Random Forrest (RF)
+
+Random Forrest models are ensemble networks of decision trees that combine to predict classification or regression variables. The decision tree is a series of decisions that splits data into buckets or nodes based on a value of one of the predictor variables. For classification, the split decision is evaluated using the response variable and the relative value of the gini purity index (gini). The gini value describes the relative proportions of classes at each node. Determining which predictor to use to split the data as well as which predictors to consider and compare is one parameter that can be set to limit complexity. Additionally, the number of trees that make up the RF model can be set to limit complexity and maximize accuracy.  
+
+For the fifth model I will continue to sample, ensuring to set seed and change with every iteration. The RF parameters will only be set to number of trees as 500. Additional arguments to help fit the model are out of bag proximity (oob.prox) which tells the model to use the observations not used in the training to measure accuracy. Also, importance tells the model to track variable importance.
+
+```{r code_model5, message=FALSE, warning=FALSE}
+#readRDS("LeaderBoard.rdata")
+for(j in 1:3){
+  #set values on leader board
+  LeaderBoard$Model[j+12]<- "Model 5 RF"
+  LeaderBoard$Sample.Size[j+12]<- num_samps_mod_1[j]
+  LeaderBoard$A..Sample.Size.Proportion[j+12]<-num_samps_mod_1[j]/60000
+  #declare empty vectors to store calculated values
+  training_idx_mod_1<- list()
+  Accuracy_mod1_runs<- c()
+  for (i in 1:3){
+    
+    #set seed
+    set.seed(5678*i)
+    #pull sample index
+    training_idx_mod_1<- sample(x = 1:nrow(MINST_Train), size =num_samps_mod_1[j],replace = F)
+    #fit model
+   set.seed(5678*i)
+   rf_model<-randomForest(label~.,data= MINST_Train[training_idx_mod_1,] ,ntree=500, oob.prox =T, importance=T)
+    #make predictions and compare results
+    performance <- confusionMatrix(predict(rf_model, MINST_Test), reference=MINST_Test$label%>%as.factor())
+
+    #pull accuracy
+    Accuracy_mod1_runs[i]<- performance$overall[1]
+
+  }
+  #compute average accuracy across runs
+  LeaderBoard$B..Accuracy[j+12]<- Accuracy_mod1_runs%>%mean()
+  LeaderBoard$Points[j+12]<- 0.5 * LeaderBoard$A..Sample.Size.Proportion[j+12] + (1 - LeaderBoard$B..Accuracy[j+12])
+}
+
+#saveRDS(LeaderBoard, "LeaderBoard.rdata")
+```
+
+
+### Model 6: Random Forrest (RF)
+
+For the sixth model I will continue to sample, ensuring to set seed and change with every iteration. The RF parameters be set to number of trees as 1000 and this time I will set mtry = 0.5. This means at every node the trees will now consider 24 variables, half, instead of the default, sqrt(# of variables) or 7 in this case. All additional arguments remain the same as before.
+
+
+```{r code_model6, message=FALSE, warning=FALSE}
+#readRDS("LeaderBoard.rdata")
+for(j in 1:3){
+  #set values on leader board
+  LeaderBoard$Model[j+15]<- "Model 6 RF"
+  LeaderBoard$Sample.Size[j+15]<- num_samps_mod_1[j]
+  LeaderBoard$A..Sample.Size.Proportion[j+15]<-num_samps_mod_1[j]/60000
+  #declare empty vectors to store calculated values
+  training_idx_mod_1<- list()
+  Accuracy_mod1_runs<- c()
+  for (i in 1:3){
+    
+    #set seed
+    set.seed(6789*i)
+    #pull sample index
+    training_idx_mod_1<- sample(x = 1:nrow(MINST_Train), size =num_samps_mod_1[j],replace = F)
+    #fit model
+   set.seed(6789*i)
+   rf_model<-randomForest(label~.,data= MINST_Train[training_idx_mod_1,] ,mtry=.5,ntree=100, oob.prox =T, importance=T)
+    #make predictions and compare results
+    performance <- confusionMatrix(predict(rf_model, MINST_Test), reference=MINST_Test$label%>%as.factor())
+
+    #pull accuracy
+    Accuracy_mod1_runs[i]<- performance$overall[1]
+
+  }
+  #compute average accuracy across runs
+  LeaderBoard$B..Accuracy[j+15]<- Accuracy_mod1_runs%>%mean()
+  LeaderBoard$Points[j+15]<- 0.5 * LeaderBoard$A..Sample.Size.Proportion[j+15] + (1 - LeaderBoard$B..Accuracy[j+15])
+}
+
+#saveRDS(LeaderBoard, "LeaderBoard.rdata")
+```
+
+### Model 7: Ensample (KNN+GLM+RF)
+
+Ensemble models are combinations of multiple models that all predict the same outcomes and the final prediction is a combination or weighted sum of the values. For this model I will use Model 2 KNN, Model 3 GLM, and Model 5 RF. All predictions will be averaged to make final predictions. All parameters for selected models will remain the same. If there is no consensus then I will select a random prediction of the three models. Then I will review performance extracting the accuracy of each run. The accuracy is stored, and the model runs an additional 2 times before averaging and posting the score on the leaderboard. The entire process runs for each sample size updating the leaderboard each time. 
+
+
+
+```{r code_model7, message=FALSE, warning=FALSE}
+
+#readRDS("LeaderBoard.rdata")
+for(j in 1:3){
+
+  #set values on leader board
+  LeaderBoard$Model[j+18]<- "Model 7 Ensamble"
+  LeaderBoard$Sample.Size[j+18]<- num_samps_mod_1[j]
+  LeaderBoard$A..Sample.Size.Proportion[j+18]<-num_samps_mod_1[j]/60000
+  #declare empty vectors to store calculated values
+  training_idx_mod_1<- list()
+  Accuracy_mod1_runs<- c()
+  for (i in 1:3){
+
+    #set seed
+    set.seed(9874*i)
+    #pull sample index
+    training_idx_mod_1<- sample(x = 1:nrow(MINST_Train), size =num_samps_mod_1[j],replace = F)
+    set.seed(9874*i)
+    #fit Model 2 KNN 
+    knn.10 <-  knn(train = MINST_Train[training_idx_mod_1,-1]%>%as.matrix(),
+                  test = MINST_Test[,-1]%>%as.matrix(),
+                  cl = MINST_Train[training_idx_mod_1,1]%>%as.matrix(),
+                  k=10)
+    set.seed(9874*i)
+    #swt up model matrix
+    x <- model.matrix(label~., MINST_Train[training_idx_mod_1,])
+    y <- factor(MINST_Train$label[training_idx_mod_1])
+    
+    #declare range of lambda values to try
+    lambda <- 10^seq(10, -2, length = 100)
+    #set alpha value
+    alpha = .3
+    #fit Model 3 GLM
+    set.seed(9874*i)
+    glm.mod <- glmnet(x, y, alpha = alpha, lambda = lambda, family="multinomial")
+    #find the best lambda from our list via cross-validation
+    set.seed(9874*i)
+    cv.out <- cv.glmnet(x, y, alpha = alpha,family="multinomial" )
+    #pull out best lambda value
+    bestlam <- cv.out$lambda.min
+    #make predictions
+    glm.pred <- predict(glm.mod, s = bestlam, newx =MINST_Test%>%data.matrix() ,  type = "class")
+    #compare results
+    
+     set.seed(9874*i)
+   rf_model<-randomForest(label~.,data= MINST_Train[training_idx_mod_1,] ,ntree=500, oob.prox =T, importance=T)
+    rf_pred<- predict(rf_model, MINST_Test)
+    
+    pred_df<- data.frame("KNN"= knn.10, "GLM"= glm.pred, "RF"=rf_pred )
+    
+    
+    #Vote on final predictions
+    ensbl_pred<- sapply(1:nrow(pred_df) ,FUN = function(x){
+      #count label frequency
+      freq<-table(pred_df[x,]%>%as.character()%>%as.vector())
+      #find the level value associated with highest frequency
+      idx<- names(freq)[freq==max(freq)]
+      #assign final predictive value
+      final.pred<- levels(pred_df[,1])[as.numeric(idx)]
+      #return random choice if there is no majority
+      if (length(final.pred)>1){
+        return(pred_df[x,sample(1:3,1)]%>%as.character())
+      }else{
+        return(final.pred)
+      }
+      
+      })
+#evaluate performance
+    performance <- confusionMatrix(data = ensbl_pred%>%as.factor() , 
+                                   reference =  MINST_Test$label%>%as.factor())
+    #pull accuracy
+    Accuracy_mod1_runs[i]<- performance$overall[1]
+
+  }
+  #compute average accuracy across runs
+  LeaderBoard$B..Accuracy[j+18]<- Accuracy_mod1_runs%>%mean()
+  LeaderBoard$Points[j+18]<- 0.5 * LeaderBoard$A..Sample.Size.Proportion[j+18] + (1 - LeaderBoard$B..Accuracy[j+18])
+}
+
+#saveRDS(LeaderBoard, "LeaderBoard.rdata")
+```
+
+### Model 8
+
+
+```{r code_model8, message=FALSE, warning=FALSE}
+
+#readRDS("LeaderBoard.rdata")
+for(j in 1:3){
+  #set values on leader board
+  LeaderBoard$Model[j+21]<- "Model 8 GBM"
+  LeaderBoard$Sample.Size[j+21]<- num_samps_mod_1[j]
+  LeaderBoard$A..Sample.Size.Proportion[j+21]<-num_samps_mod_1[j]/60000
+  #declare empty vectors to store calculated values
+  training_idx_mod_1<- list()
+  Accuracy_mod1_runs<- c()
+  for (i in 1:3){
+    #set seed
+    set.seed(8745*i)
+    #pull sample index
+    training_idx_mod_1<- sample(x = 1:nrow(MINST_Train), size =num_samps_mod_1[j],replace = F)
+    #fit model
+    set.seed(8745*i)
+    gbm_mod<-gbm(label~.,data=MINST_Train[training_idx_mod_1,], distribution="multinomial", n.trees=10, cv.folds=5, n.cores=6)
+    #make predicitons
+    gbm.pred<- predict.gbm(gbm_mod,n.trees=10, newdata=MINST_Test,type='response')
+    #find maximum prediced value to identify class assignment
+    gbm.pred<- apply(X = gbm.pred, MARGIN = 1,FUN = function(x){
+        colnames(gbm.pred)[x==max(x)]
+      })
+    
+    performance <- confusionMatrix(data = gbm.pred%>%as.factor() , 
+                                   reference =  MINST_Test$label%>%as.factor())
+    #pull accuracy
+    Accuracy_mod1_runs[i]<- performance$overall[1]
+
+  }
+  #compute average accuracy across runs
+  LeaderBoard$B..Accuracy[j+21]<- Accuracy_mod1_runs%>%mean()
+  LeaderBoard$Points[j+21]<- 0.5 * LeaderBoard$A..Sample.Size.Proportion[j+21] + (1 - LeaderBoard$B..Accuracy[j+21])
+}
+
+#saveRDS(LeaderBoard, "LeaderBoard.rdata")
+```
+
+### Model 9: Neural Net (NN)
+
+Neural Networks are another very powerful classification method. A simplified description is that it breaks down the predictors into a certain number of nodes. It then evaluates the values at each node and determines a value, usually a proportion calculated through an activation function. Those nodes are then used to predict on the response variable. A Neural Network can have multiple layers.  For the nnet() , the parameter size determines the number of nodes in the dingle layer.
+
+
+```{r code_model9, message=FALSE, warning=FALSE }
+#readRDS("LeaderBoard.rdata")
+for(j in 1:3){
+
+  #set values on leader board
+  LeaderBoard$Model[j+24]<- "Model 9 NN"
+  LeaderBoard$Sample.Size[j+24]<- num_samps_mod_1[j]
+  LeaderBoard$A..Sample.Size.Proportion[j+24]<-num_samps_mod_1[j]/60000
+  #declare empty vectors to store calculated values
+  training_idx_mod_1<- list()
+  Accuracy_mod1_runs<- c()
+  for (i in 1:3){
+ 
+    #set seed
+    set.seed(7456*i)
+    #pull sample index
+    training_idx_mod_1<- sample(x = 1:nrow(MINST_Train), size =num_samps_mod_1[j],replace = F)
+    #fit model
+    set.seed(7456*i)
+   nn_mod<- nnet(label~., MINST_Train[training_idx_mod_1,], 
+         size = 10)
+    #View(nn_mod$fitted.values)
+        nn.pred<- predict(nn_mod, newdata=MINST_Test)
+    
+     nn.pred<- apply(X = nn.pred, MARGIN = 1,FUN = function(x){
+        colnames(nn.pred)[x==max(x)]
+      })
+ 
+    performance <- confusionMatrix(data = nn.pred%>%as.factor() , 
+                                   reference =  MINST_Test$label%>%as.factor())
+    #pull accuracy
+    Accuracy_mod1_runs[i]<- performance$overall[1]
+
+  }
+  #compute average accuracy across runs
+  LeaderBoard$B..Accuracy[j+24]<- Accuracy_mod1_runs%>%mean()
+  LeaderBoard$Points[j+24]<- 0.5 * LeaderBoard$A..Sample.Size.Proportion[j+24] + (1 - LeaderBoard$B..Accuracy[j+24])
+}
+#import the function from Github
+
+#plot each model
+plot.nnet(nn_mod,circle.cex = 1,cex.val = .5)
+#saveRDS(LeaderBoard, "LeaderBoard.rdata")
+```
+
+### Model 10: Multiple Layer Neural Net (NN)
+
+As mentioned a Neural Network can have multiple layers.  I used the caret package and the method “mlpML”. I pulled my samples setting the seed to change on every iteration. I set the tuneGrid parameter to hold the number of layers and sizes. I designated 3 hidden layers with sizes 20, 15 and 10. After the model was finished I predicted, evaluated, and stored the accuracy on the leaderboard.
+
+
+
+```{r code_model10, message=FALSE, warning=FALSE}
+#LeaderBoard<-readRDS("LeaderBoard.rdata")
+for(j in 1:3){
+
+  #set values on leader board
+  LeaderBoard$Model[j+27]<- "Model 10 NN"
+  LeaderBoard$Sample.Size[j+27]<- num_samps_mod_1[j]
+  LeaderBoard$A..Sample.Size.Proportion[j+27]<-num_samps_mod_1[j]/60000
+  #declare empty vectors to store calculated values
+  training_idx_mod_1<- list()
+  Accuracy_mod1_runs<- c()
+  for (i in 1:3){
+ 
+    #set seed
+    set.seed(5896*i)
+    #pull sample index
+    training_idx_mod_1<- sample(x = 1:nrow(MINST_Train), size =num_samps_mod_1[j],replace = F)
+    #fit model
+    rctrlR <- trainControl(method = "cv", number = 3, returnResamp = "all", search = "random")
+    # Encode as a one hot vector multilabel data
+set.seed(5896)
+multi_lyr_nn <- train(label ~ ., data = MINST_Train[training_idx_mod_1,], 
+                          method = "mlpML", trControl = rctrlR,
+                          tuneGrid = data.frame(layer1 = 20, layer2 = 15, layer3 = 10),
+                          rep = 3,
+                           threshold = 0.1,        
+                           stepmax = 1e+05)
+multi_lyr_nn_pred <- predict(multi_lyr_nn, MINST_Test)
+
+    performance <- confusionMatrix(data = multi_lyr_nn_pred%>%as.factor() , 
+                                   reference =  MINST_Test$label%>%as.factor())
+    #pull accuracy
+    Accuracy_mod1_runs[i]<- performance$overall[1]
+
+  }
+  #compute average accuracy across runs
+  LeaderBoard$B..Accuracy[j+27]<- Accuracy_mod1_runs%>%mean()
+  LeaderBoard$Points[j+27]<- 0.5 * LeaderBoard$A..Sample.Size.Proportion[j+27] + (1 - LeaderBoard$B..Accuracy[j+27])
+}
+
+#saveRDS(LeaderBoard, "LeaderBoard.rdata")
+```
+
+## Scoreboard
+
+```{r scoreboard}
+#LeaderBoard<-readRDS("LeaderBoard.rdata")
+LeaderBoard<- LeaderBoard%>%arrange(Points)
+for (i in 3:5){
+  LeaderBoard[,i]<-round(LeaderBoard[,i],4)
+  
+}
+datatable(data = LeaderBoard, rownames = FALSE)
+```
+
+## Discussion
+
+I generally expected the neural networks to perform better especially since there is so much talk about image classification and how well they do. I think the simplicity of our dataset might be limiting the problem space to certain models. As it stands the top performing model is Model 2 KNN with only 1000 samples. This is promising since the goal of the challenge was to find the least complex method with the highest accuracy. In terms of accuracy the top two models have the 3rd and 4th best accuracy. Model 7 Ensemble and Model 10 NN have the 1st and 2nd highest accuracy which does support some initial assumptions that hey would be the winners. Model 8 GBM was the worst of all the models for both accuracy and points. I think that this was due to the low number of trees. GBM can also be sensitive and need more hyper-parameter tuning with adds to the complexity of the model. In conclusion, we see that simple models perform well all around with low complexity and high accuracy. Additionally, with few parameters these can be scaled to larger data sets more easily. One last note, ensembles can be very useful to improve accuracy as seen here but at a cost.
+
